@@ -1,0 +1,17 @@
+node_modules
+dist
+release
+.DS_Store
+*.log
+*.err
+.vite
+config.local.json
+
+# 调试临时输出
+b.txt
+b2.txt
+t.txt
+bld.txt
+tst.txt
+build*.txt
+vitest-out.txt

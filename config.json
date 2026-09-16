@@ -1,0 +1,65 @@
+{
+  "version": "1.0",
+  "language": "auto",
+  "theme": "system",
+  "paths": {
+    "ffmpeg": "",
+    "ffprobe": "",
+    "outputDir": "E:\\BaiduNetdiskDownload"
+  },
+  "transcode": {
+    "parallelJobs": 1,
+    "preferredHW": "auto",
+    "fallbackToSoftware": true,
+    "overwrite": "ask"
+  },
+  "simpleMode": {
+    "enabled": true,
+    "videoCodec": "hevc",
+    "container": "mp4",
+    "target": {
+      "resolution": 1080,
+      "fps": 30,
+      "bitrateMbps": 6
+    },
+    "scaleResolution": false,
+    "autoBitrateBaseMbps": 6
+  },
+  "expertDefaults": {
+    "videoCodec": "hevc",
+    "resolutionMode": "source",
+    "fpsMode": "source",
+    "bitrateMode": "crf",
+    "crf": 23,
+    "audioCodec": "aac",
+    "audioBitrateKbps": 192,
+    "sampleRate": 48000,
+    "channels": 2,
+    "container": "mp4",
+    "extraArgs": []
+  },
+  "presets": {
+    "custom": []
+  },
+  "hardware": {
+    "autoDetect": true,
+    "allow": [
+      "nvenc",
+      "qsv",
+      "videotoolbox",
+      "mps",
+      "amf",
+      "vaapi"
+    ],
+    "force": null
+  },
+  "advanced": {
+    "showCommandPreview": true,
+    "preventSleep": true
+  },
+  "download": {
+    "enabled": true,
+    "proxy": "",
+    "subtitles": false
+  }
+}

@@ -1,0 +1,150 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ------------------------------------------------------------------
+   主题变量：浅色为默认（:root），深色通过 <html class="dark"> 覆盖
+   颜色以「R  G  B」三元组存放，供 Tailwind 的 rgb(var(--x) / <alpha>) 使用
+   ------------------------------------------------------------------ */
+:root {
+  --c-surface-900: 245 246 248;
+  --c-surface-800: 255 255 255;
+  --c-surface-700: 241 243 245;
+  --c-surface-600: 224 228 233;
+  --c-surface-500: 203 210 217;
+
+  --c-text-strong: 15 23 42;
+  --c-text-body: 31 41 55;
+  --c-text-muted: 91 101 114;
+  --c-text-faint: 138 148 161;
+
+  --c-brand-400: 13 148 136;
+  --c-brand-500: 20 184 166;
+  --c-brand-600: 15 118 110;
+  --c-accent: 13 148 136;
+  --c-on-brand: 255 255 255;
+
+  --c-warn: 180 83 9;
+  --c-warn-strong: 146 64 14;
+  --c-warn-bg: 254 240 217;
+  --c-warnline: 252 211 77;
+
+  --c-err: 220 38 38;
+  --c-err-strong: 185 28 28;
+  --c-err-bg: 253 227 227;
+  --c-err-bg-strong: 251 208 208;
+  --c-errline: 252 165 165;
+
+  --c-ok-strong: 4 120 87;
+  --c-ok-bg: 219 246 236;
+
+  --c-info-strong: 3 105 161;
+  --c-info-bg: 219 241 252;
+
+  color-scheme: light;
+}
+
+.dark {
+  --c-surface-900: 13 17 23;
+  --c-surface-800: 21 27 35;
+  --c-surface-700: 28 36 48;
+  --c-surface-600: 38 48 61;
+  --c-surface-500: 51 64 79;
+
+  --c-text-strong: 241 245 249;
+  --c-text-body: 226 232 240;
+  --c-text-muted: 148 163 184;
+  --c-text-faint: 100 116 139;
+
+  --c-brand-400: 94 234 212;
+  --c-brand-500: 45 212 191;
+  --c-brand-600: 20 184 166;
+  --c-accent: 94 234 212;
+  --c-on-brand: 15 23 42;
+
+  --c-warn: 251 191 36;
+  --c-warn-strong: 252 211 77;
+  --c-warn-bg: 55 45 31;
+  --c-warnline: 120 78 20;
+
+  --c-err: 248 113 113;
+  --c-err-strong: 252 165 165;
+  --c-err-bg: 54 33 40;
+  --c-err-bg-strong: 65 35 42;
+  --c-errline: 127 45 45;
+
+  --c-ok-strong: 110 231 183;
+  --c-ok-bg: 20 51 50;
+
+  --c-info-strong: 125 211 252;
+  --c-info-bg: 20 48 65;
+
+  color-scheme: dark;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-surface-900 text-body antialiased;
+    font-family: 'Inter', 'Microsoft YaHei UI', 'PingFang SC', system-ui, sans-serif;
+    transition: background-color 0.15s ease, color 0.15s ease;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply rounded bg-surface-500;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+}
+
+/* 不确定进度条动画 */
+@keyframes importSlide {
+  0% {
+    transform: translateX(-110%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-xl border border-surface-600 bg-surface-800/80 p-4;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium
+      transition-colors disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .btn-primary {
+    @apply btn bg-brand-600 text-on-brand hover:bg-brand-500;
+  }
+  .btn-ghost {
+    @apply btn border border-surface-600 bg-surface-700 text-body hover:bg-surface-600;
+  }
+  .btn-danger {
+    @apply btn border border-errline bg-err-bg text-err hover:bg-err-bg-strong;
+  }
+  .input {
+    @apply w-full rounded-lg border border-surface-600 bg-surface-700 px-3 py-2 text-sm
+      text-strong outline-none placeholder:text-faint focus:border-brand-500;
+  }
+  .label {
+    @apply mb-1 block text-xs font-medium uppercase tracking-wide text-muted;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium;
+  }
+  .mono {
+    font-family: 'JetBrains Mono', Consolas, 'Courier New', monospace;
+  }
+}
