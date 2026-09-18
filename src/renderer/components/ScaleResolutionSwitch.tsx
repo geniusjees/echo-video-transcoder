@@ -6,13 +6,14 @@ interface Props {
   value: boolean;
   onChange: (v: boolean) => void;
   disabled?: boolean;
-  target: { resolution: number; fps: number; bitrateMbps: number };
+  target: { resolution: number; fps: number; bitrateMbps: number; crf?: number };
 }
 
 /** 「是否调整分辨率」开关（§13.2，情形 C） */
 export default function ScaleResolutionSwitch({ value, onChange, disabled, target }: Props) {
   const t = useT();
-  const vars = { r: target.resolution, f: target.fps, b: target.bitrateMbps };
+  const c = target.crf ?? 28;
+  const vars = { r: target.resolution, f: target.fps, b: target.bitrateMbps, c };
 
   const hint = (
     <div className="space-y-2">

@@ -11,6 +11,7 @@ export const TARGET = {
   resolution: 1080,
   fps: 30,
   bitrateMbps: 6,
+  crf: 28,
   codec: 'hevc' as VideoCodec
 };
 
@@ -134,6 +135,9 @@ export const IPC = {
   FILES_EXPAND: 'files:expand',
   OPEN_PATH: 'open:path',
   THUMBNAIL: 'media:thumbnail',
+  PREVIEW_PLAY: 'media:previewPlay',
+  PREVIEW_SEEK: 'media:previewSeek',
+  PREVIEW_STOP: 'media:previewStop',
   BUILD_COMMAND: 'command:build',
   POWER_SET: 'power:set',
   THEME_SET: 'theme:set',
@@ -175,7 +179,8 @@ export const DEFAULT_CONFIG: AppConfig = {
     target: {
       resolution: 1080,
       fps: 30,
-      bitrateMbps: 6
+      bitrateMbps: 6,
+      crf: 28
     },
     scaleResolution: false,
     autoBitrateBaseMbps: 6
@@ -184,6 +189,8 @@ export const DEFAULT_CONFIG: AppConfig = {
   expertDefaults: {
     videoCodec: 'hevc',
     resolutionMode: 'source',
+    allowUpscale: false,
+    allowIncreaseFps: false,
     fpsMode: 'source',
     bitrateMode: 'crf',
     crf: 23,

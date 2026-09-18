@@ -14,7 +14,7 @@ import { detectCached } from '../hardware/detector';
 import { expandPaths } from '../media/scan';
 import { probe } from '../media/probe';
 import { decideSimple } from '../transcoder/simpleDecision';
-import { resolveExpertParams } from '../transcoder/expertParams';
+import { decideExpert } from '../../shared/params';
 import { isVideoFile } from '../concat/segmentProbe';
 import { broadcast, createThrottledEmitter } from '../utils/broadcast';
 
@@ -130,11 +130,7 @@ export function registerQueueIpc(): void {
 
       const decision =
         mode === 'expert' && arg.expert
-          ? {
-              action: 'transcode' as const,
-              reason: '专家模式参数',
-              params: resolveExpertParams(source, arg.expert, capability)
-            }
+          ? decideExpert(source, arg.expert, capability)
           : decideSimple(source, {
               scaleResolution: scale,
               codec: cfg.simpleMode.videoCodec,

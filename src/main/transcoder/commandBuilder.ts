@@ -50,6 +50,43 @@ function trimArgs(trim?: { startSec: number; endSec: number }): string[] {
   return args;
 }
 
+function buildEditVideoFilters(opts: {
+  trimStartSec?: number;
+  trimEndSec?: number;
+  rotation?: { mode: 0 | 90 | 180 | 270; flip: 'none' | 'horizontal' | 'vertical'; metadataOnly?: boolean };
+  cutSegments?: Array<{ startSec: number; endSec: number }>;
+}): string[] {
+  const filters: string[] = [];
+
+  if (opts.trimStartSec !== undefined || opts.trimEndSec !== undefined) {
+    const start = opts.trimStartSec ?? 0;
+    const end = opts.trimEndSec ?? Number.MAX_SAFE_INTEGER;
+    filters.push(`trim=start=${start}:end=${end}`);
+  }
+
+  if (opts.rotation?.mode === 90) filters.push('transpose=1');
+  else if (opts.rotation?.mode === 180) filters.push('transpose=2,transpose=2');
+  else if (opts.rotation?.mode === 270) filters.push('transpose=2');
+
+  if (opts.rotation?.flip === 'horizontal') filters.push('hflip');
+  if (opts.rotation?.flip === 'vertical') filters.push('vflip');
+
+  if (opts.cutSegments?.length) {
+    const expr = opts.cutSegments
+      .map((seg) => `between(t,${seg.startSec},${seg.endSec})`)
+      .join('+');
+    filters.push(`select='not(${expr})'`);
+    filters.push('setpts=N/FRAME_RATE/TB');
+  }
+
+  return filters;
+}
+
+function buildEditAudioFilter(opts?: { input: string; originalVolume: number; backgroundVolume: number }): string {
+  if (!opts) return '';
+  return `[0:a]volume=${opts.originalVolume}[a0];[1:a]volume=${opts.backgroundVolume}[a1];[a0][a1]amix=inputs=2:duration=longest:dropout_transition=0[aout]`;
+}
+
 function buildFilters(
   source: SourceInfo,
   params: ResolvedParams,
@@ -208,6 +245,62 @@ export function buildAudioExtractArgs(
 }
 
 /** 按任务类型分派构建 */
+export function buildEditArgs(
+  input: string,
+  output: string,
+  opts: {
+    trimStartSec?: number;
+    trimEndSec?: number;
+    cutSegments?: Array<{ startSec: number; endSec: number }>;
+    rotation?: { mode: 0 | 90 | 180 | 270; flip: 'none' | 'horizontal' | 'vertical'; metadataOnly?: boolean };
+    transcode?: boolean;
+    backgroundAudio?: { input: string; originalVolume: number; backgroundVolume: number };
+  },
+  source: SourceInfo,
+  ctx: CommandContext = {}
+): string[] {
+  const args: string[] = ['-hide_banner', '-y', '-progress', 'pipe:1', '-nostats'];
+  if (opts.trimStartSec && opts.trimStartSec > 0) args.push('-ss', String(opts.trimStartSec));
+  if (opts.trimEndSec && opts.trimEndSec > (opts.trimStartSec ?? 0)) args.push('-to', String(opts.trimEndSec + (opts.trimStartSec ?? 0)));
+  args.push('-i', input);
+
+  const bgInput = opts.backgroundAudio?.input;
+  if (bgInput) args.push('-i', bgInput);
+
+  const filters = buildEditVideoFilters({
+    trimStartSec: opts.trimStartSec,
+    trimEndSec: opts.trimEndSec,
+    rotation: opts.rotation,
+    cutSegments: opts.cutSegments
+  });
+  const needsReencode = Boolean(filters.length) || Boolean(opts.transcode) || Boolean(bgInput);
+
+  if (needsReencode) {
+    args.push('-map', '0:v:0');
+    if (filters.length) args.push('-vf', filters.join(','));
+    if (bgInput) {
+      args.push('-filter_complex', buildEditAudioFilter(opts.backgroundAudio));
+      args.push('-map', '[aout]');
+    } else {
+      args.push('-map', '0:a:0?');
+    }
+    args.push('-sn', '-dn', '-c:v', 'libx264', '-preset', 'medium', '-crf', '23', '-pix_fmt', 'yuv420p');
+    if (!bgInput) args.push('-c:a', 'aac', '-movflags', '+faststart');
+    else args.push('-c:a', 'aac', '-shortest', '-movflags', '+faststart');
+  } else {
+    args.push('-map', '0:v:0', '-map', '0:a:0?', '-sn', '-dn', '-c', 'copy');
+  }
+
+  if (bgInput && !filters.length) {
+    args.push('-filter_complex', buildEditAudioFilter(opts.backgroundAudio));
+    args.push('-map', '[aout]');
+    args.push('-shortest', '-c:a', 'aac');
+  }
+
+  args.push(output);
+  return args;
+}
+
 export function buildArgsForTask(
   payload: TaskPayload,
   source: SourceInfo,
@@ -227,6 +320,21 @@ export function buildArgsForTask(
       return buildRotateArgs(payload.input, payload.output, payload.rotate!, ctx);
     case 'extractAudio':
       return buildAudioExtractArgs(payload.input, payload.output, payload.audio!);
+    case 'edit':
+      return buildEditArgs(
+        payload.input,
+        payload.output,
+        {
+          trimStartSec: payload.edit?.trimStartSec,
+          trimEndSec: payload.edit?.trimEndSec,
+          cutSegments: payload.edit?.cutSegments,
+          rotation: payload.edit?.rotation,
+          transcode: payload.edit?.transcode,
+          backgroundAudio: payload.edit?.backgroundAudio
+        },
+        source,
+        ctx
+      );
     default:
       throw new Error(`不支持的任务类型：${payload.kind}`);
   }

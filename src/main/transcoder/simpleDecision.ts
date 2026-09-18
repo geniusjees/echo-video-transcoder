@@ -23,14 +23,16 @@ export interface DecideCtx {
   capability?: HWCapability;
   preferredHW?: 'auto' | HWKind;
   /** 目标档位（默认 TARGET，可由 config.simpleMode.target 覆盖） */
-  target?: { resolution: number; fps: number; bitrateMbps: number };
+  target?: { resolution: number; fps: number; bitrateMbps: number; crf?: number };
 }
 
 function baseParams(ctx: DecideCtx): ResolvedParams {
+  const target = ctx.target ?? TARGET;
   return {
-    resolution: ctx.target?.resolution ?? TARGET.resolution,
-    fps: ctx.target?.fps ?? TARGET.fps,
-    bitrateMbps: ctx.target?.bitrateMbps ?? TARGET.bitrateMbps,
+    resolution: target.resolution,
+    fps: target.fps,
+    bitrateMbps: 0,
+    crf: target.crf ?? 28,
     codec: ctx.codec ?? (TARGET.codec as ResolvedParams['codec']),
     container: ctx.container ?? 'mp4',
     audioCodec: ctx.audioCodec ?? 'aac',
@@ -79,7 +81,8 @@ export function decideSimple(source: SourceInfo, ctx: DecideCtx): SimpleDecision
         ...baseParams(ctx),
         resolution: source.height,
         fps: fpsCap.value,
-        bitrateMbps: brCap.value,
+        bitrateMbps: 0,
+        crf: (ctx.target?.crf ?? TARGET.crf ?? 28),
         capped: brCap.capped || fpsCap.capped,
         caps: { resolution: false, bitrate: brCap.capped, fps: fpsCap.capped }
       },
@@ -87,7 +90,7 @@ export function decideSimple(source: SourceInfo, ctx: DecideCtx): SimpleDecision
     );
     return {
       action: 'transcode',
-      reason: `分辨率 ${source.height}p 低于目标但码率偏高，保留分辨率并压制码率至 ${params.bitrateMbps}Mbps`,
+      reason: `分辨率 ${source.height}p 低于目标但码率偏高，保留分辨率并按 CRF ${params.crf ?? 28} 质量压制`,
       params
     };
   }
@@ -99,7 +102,8 @@ export function decideSimple(source: SourceInfo, ctx: DecideCtx): SimpleDecision
         ...baseParams(ctx),
         resolution: resCap.value,
         fps: fpsCap.value,
-        bitrateMbps: brCap.value,
+        bitrateMbps: 0,
+        crf: (ctx.target?.crf ?? TARGET.crf ?? 28),
         capped: brCap.capped || fpsCap.capped || resCap.capped,
         caps: {
           resolution: resCap.capped,
@@ -111,9 +115,7 @@ export function decideSimple(source: SourceInfo, ctx: DecideCtx): SimpleDecision
     );
     return {
       action: 'transcode',
-      reason:
-        `按统一配置重编码：${params.resolution}p / ${params.fps}fps / ${params.bitrateMbps}Mbps` +
-        (params.caps.bitrate ? `（码率被源码率封顶 ${source.bitrateMbps}Mbps）` : ''),
+      reason: `按统一配置重编码：${params.resolution}p / ${params.fps}fps / CRF ${params.crf ?? 28}`,
       params
     };
   }
@@ -126,7 +128,8 @@ export function decideSimple(source: SourceInfo, ctx: DecideCtx): SimpleDecision
         ...baseParams(ctx),
         resolution: resCap.value,
         fps: fpsCap.value,
-        bitrateMbps: brCap.value,
+        bitrateMbps: 0,
+        crf: (ctx.target?.crf ?? TARGET.crf ?? 28),
         caps: {
           resolution: false,
           bitrate: brCap.capped,
@@ -138,7 +141,7 @@ export function decideSimple(source: SourceInfo, ctx: DecideCtx): SimpleDecision
     );
     return {
       action: 'transcode',
-      reason: `缩放至 ${params.resolution}p / ${params.fps}fps / ${params.bitrateMbps}Mbps`,
+      reason: `缩放至 ${params.resolution}p / ${params.fps}fps / CRF ${params.crf ?? 28}`,
       params
     };
   }
@@ -156,7 +159,8 @@ export function decideSimple(source: SourceInfo, ctx: DecideCtx): SimpleDecision
       ...baseParams(ctx),
       resolution: source.height,
       fps: fpsCap.value,
-      bitrateMbps: auto.bitrateMbps,
+      bitrateMbps: 0,
+      crf: ctx.target?.crf ?? TARGET.crf ?? 28,
       capped: auto.cappedBySource || fpsCap.capped,
       caps: { resolution: false, bitrate: auto.cappedBySource, fps: fpsCap.capped }
     },
@@ -165,13 +169,7 @@ export function decideSimple(source: SourceInfo, ctx: DecideCtx): SimpleDecision
 
   return {
     action: 'transcode',
-    reason:
-      `保持 ${source.height}p / ${params.fps}fps，码率自动计算 ` +
-      `${auto.rawMbps}Mbps` +
-      (auto.cappedBySource
-        ? ` → 源码率上限 ${round1(source.bitrateMbps!)}Mbps，已封顶至 ${auto.bitrateMbps}Mbps`
-        : ` → ${auto.bitrateMbps}Mbps`),
-    params,
-    autoBitrate: true
+    reason: `保持 ${source.height}p / ${params.fps}fps，按 CRF ${params.crf ?? 28} 质量压制，不提升分辨率`,
+    params
   };
 }

@@ -59,6 +59,8 @@ export function expertOptionsFromConfig(config: AppConfig | null): ExpertOptions
     videoCodec: d?.videoCodec ?? 'hevc',
     hw: 'auto',
     resolutionMode: d?.resolutionMode ?? 'source',
+    allowUpscale: d?.allowUpscale ?? false,
+    allowIncreaseFps: d?.allowIncreaseFps ?? false,
     fpsMode: d?.fpsMode ?? 'source',
     bitrateMode: d?.bitrateMode ?? 'crf',
     crf: d?.crf ?? 23,

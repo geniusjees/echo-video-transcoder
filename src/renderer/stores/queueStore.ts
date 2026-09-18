@@ -43,6 +43,14 @@ interface QueueState {
 }
 
 const MAX_LOGS = 300;
+const FINAL_STATUSES = new Set<TaskStatus>(['done', 'error', 'cancelled', 'skipped']);
+
+export function shouldPromptClearQueue(items: QueueItem[]): boolean {
+  if (!items.length) return false;
+  const hasDone = items.some((item) => item.status === 'done');
+  const allFinal = items.every((item) => FINAL_STATUSES.has(item.status));
+  return allFinal && hasDone;
+}
 
 export const useQueueStore = create<QueueState>((set, get) => ({
   items: [],

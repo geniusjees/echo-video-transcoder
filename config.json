@@ -1,11 +1,11 @@
 {
   "version": "1.0",
-  "language": "auto",
+  "language": "zh-CN",
   "theme": "system",
   "paths": {
     "ffmpeg": "",
     "ffprobe": "",
-    "outputDir": "E:\\BaiduNetdiskDownload"
+    "outputDir": "\\\\192.168.3.254\\download2\\XJJ\\欧美"
   },
   "transcode": {
     "parallelJobs": 1,
@@ -20,7 +20,8 @@
     "target": {
       "resolution": 1080,
       "fps": 30,
-      "bitrateMbps": 6
+      "bitrateMbps": 6,
+      "crf": 28
     },
     "scaleResolution": false,
     "autoBitrateBaseMbps": 6
@@ -28,6 +29,8 @@
   "expertDefaults": {
     "videoCodec": "hevc",
     "resolutionMode": "source",
+    "allowUpscale": false,
+    "allowIncreaseFps": false,
     "fpsMode": "source",
     "bitrateMode": "crf",
     "crf": 23,

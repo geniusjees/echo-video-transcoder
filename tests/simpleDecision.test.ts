@@ -24,13 +24,13 @@ describe('§7 简单模式决策树（综合判断 B）', () => {
     expect(d.params).toBeNull();
   });
 
-  it('720p 30fps 10Mbps → 转码，保留 720p、压码率 6Mbps（B 综合判断）', () => {
+  it('720p 30fps 10Mbps → 转码，保留 720p、按 CRF 28 质量压制（B 综合判断）', () => {
     const d = decideSimple(src({ width: 1280, height: 720, bitrateMbps: 10 }), {
       scaleResolution: false
     });
     expect(d.action).toBe('transcode');
     expect(d.params?.resolution).toBe(720);
-    expect(d.params?.bitrateMbps).toBe(6);
+    expect(d.params?.crf).toBe(28);
     expect(d.params?.caps.resolution).toBe(false);
   });
 
@@ -39,54 +39,59 @@ describe('§7 简单模式决策树（综合判断 B）', () => {
     expect(d.action).toBe('no-op');
   });
 
-  it('1080p 60fps 10Mbps → 按统一配置重编码 1080p/30/6', () => {
+  it('普通模式输出应使用 CRF 28，而不是 VBR 6Mbps', () => {
+    const d = decideSimple(src({ bitrateMbps: 10 }), { scaleResolution: false });
+    expect(d.action).toBe('transcode');
+    expect(d.params?.crf).toBe(28);
+  });
+
+  it('1080p 60fps 10Mbps → 按统一配置重编码 1080p/30/CRF 28', () => {
     const d = decideSimple(src({ fps: 60, bitrateMbps: 10 }), { scaleResolution: false });
     expect(d.action).toBe('transcode');
     expect(d.params?.resolution).toBe(1080);
     expect(d.params?.fps).toBe(30);
-    expect(d.params?.bitrateMbps).toBe(6);
+    expect(d.params?.crf).toBe(28);
   });
 
-  it('4K 30fps 20Mbps + 开关是 → 缩放 1080p/30/6', () => {
+  it('4K 30fps 20Mbps + 开关是 → 缩放 1080p/30/CRF 28', () => {
     const d = decideSimple(src({ width: 3840, height: 2160, bitrateMbps: 20 }), {
       scaleResolution: true
     });
     expect(d.params?.resolution).toBe(1080);
     expect(d.params?.fps).toBe(30);
-    expect(d.params?.bitrateMbps).toBe(6);
+    expect(d.params?.crf).toBe(28);
   });
 
-  it('4K 30fps 20Mbps + 开关否 → 保持 4K，码率自动 24 但被源 20 封顶 → 20', () => {
+  it('4K 30fps 20Mbps + 开关否 → 保持 4K，输出按 CRF 28 质量压制', () => {
     const d = decideSimple(src({ width: 3840, height: 2160, bitrateMbps: 20 }), {
       scaleResolution: false
     });
     expect(d.params?.resolution).toBe(2160);
-    expect(d.autoBitrate).toBe(true);
-    expect(d.params?.bitrateMbps).toBe(20);
+    expect(d.params?.crf).toBe(28);
     expect(d.params?.caps.bitrate).toBe(true);
   });
 
-  it('4K 30fps 30Mbps + 开关否 → 码率自动 24Mbps（未封顶）', () => {
+  it('4K 30fps 30Mbps + 开关否 → 保持 4K，输出仍使用 CRF 28', () => {
     const d = decideSimple(src({ width: 3840, height: 2160, bitrateMbps: 30 }), {
       scaleResolution: false
     });
-    expect(d.params?.bitrateMbps).toBe(24);
+    expect(d.params?.crf).toBe(28);
     expect(d.params?.caps.bitrate).toBe(false);
   });
 
-  it('4K 24fps 10Mbps + 开关否 → 码率 min(24,10)=10 封顶（C6）', () => {
+  it('4K 24fps 10Mbps + 开关否 → 仍按 CRF 28 输出，并保持 24fps', () => {
     const d = decideSimple(src({ width: 3840, height: 2160, fps: 24, bitrateMbps: 10 }), {
       scaleResolution: false
     });
-    expect(d.params?.bitrateMbps).toBe(10);
+    expect(d.params?.crf).toBe(28);
     expect(d.params?.fps).toBe(24); // 不插帧
   });
 
-  it('1440p + 开关否 → 码率 = 6×1.78 = 10.7Mbps', () => {
+  it('1440p + 开关否 → 仍按 CRF 28 输出，保持 1440p', () => {
     const d = decideSimple(src({ width: 2560, height: 1440, bitrateMbps: 20 }), {
       scaleResolution: false
     });
-    expect(d.params?.bitrateMbps).toBe(10.7);
+    expect(d.params?.crf).toBe(28);
     expect(d.params?.resolution).toBe(1440);
   });
 

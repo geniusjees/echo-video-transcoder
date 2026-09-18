@@ -4,7 +4,8 @@ const SUFFIX: Record<TaskKind, string> = {
   transcode: '',
   rotate: '_rotated',
   extractAudio: '',
-  concat: ''
+  concat: '',
+  edit: '_edited'
 };
 
 /** 跨平台路径处理（渲染进程不直接依赖 node:path） */

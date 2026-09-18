@@ -6,6 +6,8 @@ export { resolveExpertParams } from '@shared/params';
 export function expertOptionsFromDefaults(defaults: {
   videoCodec: ResolvedParams['codec'];
   resolutionMode: ExpertOptions['resolutionMode'];
+  allowUpscale?: boolean;
+  allowIncreaseFps?: boolean;
   fpsMode: ExpertOptions['fpsMode'];
   bitrateMode: ExpertOptions['bitrateMode'];
   crf: number;
@@ -20,6 +22,8 @@ export function expertOptionsFromDefaults(defaults: {
     videoCodec: defaults.videoCodec,
     hw: 'auto',
     resolutionMode: defaults.resolutionMode,
+    allowUpscale: defaults.allowUpscale ?? false,
+    allowIncreaseFps: defaults.allowIncreaseFps ?? false,
     fpsMode: defaults.fpsMode,
     bitrateMode: defaults.bitrateMode,
     crf: defaults.crf,

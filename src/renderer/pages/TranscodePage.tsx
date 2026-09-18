@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { resolveExpertParams } from '@shared/params';
+import { decideExpert, resolveExpertParams } from '@shared/params';
 import type { QueueItem, ResolvedParams, TaskPayload } from '@shared/types';
 import QueueList from '../components/QueueList';
 import CommandPreview from '../components/CommandPreview';
@@ -156,15 +156,55 @@ export default function TranscodePage() {
           };
         })
       );
-      setItems(next);
+      const changed = next.some(
+        (item, index) =>
+          item.decision.action !== items[index].decision.action ||
+          item.status !== items[index].status ||
+          item.output !== items[index].output ||
+          item.resolved !== items[index].resolved
+      );
+      if (changed) setItems(next);
     },
     [items, mode, outputDir, setItems]
   );
 
+  const refreshExpertDecisions = useCallback(() => {
+    if (mode !== 'expert' || !items.length) return;
+    const next = items.map((it) => {
+      if (it.status === 'error') return it;
+      const d = decideExpert(it.source, expertOptions, hardware ?? undefined);
+      const out = d.params ? makeOutputPath(it.input, it.outputDir, d.params.container, 'transcode') : '';
+      return {
+        ...it,
+        decision: d,
+        resolved: d.params,
+        output: out,
+        status:
+          d.action === 'no-op'
+            ? ('skipped' as const)
+            : it.status === 'done' || it.status === 'running'
+              ? it.status
+              : ('pending' as const)
+      };
+    });
+    const changed = next.some(
+      (item, index) =>
+        item.decision.action !== items[index].decision.action ||
+        item.status !== items[index].status ||
+        item.output !== items[index].output ||
+        item.resolved !== items[index].resolved
+    );
+    if (changed) setItems(next);
+  }, [expertOptions, hardware, items, mode, setItems]);
+
   useEffect(() => {
-    void refreshDecisions(scaleResolution);
+    if (mode === 'simple') {
+      void refreshDecisions(scaleResolution);
+    } else {
+      refreshExpertDecisions();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scaleResolution, mode]);
+  }, [scaleResolution, mode, expertOptions, hardware]);
 
   // 命令预览（C7）
   useEffect(() => {
@@ -279,7 +319,7 @@ export default function TranscodePage() {
             selected={selected}
             scaleResolution={scaleResolution}
             onScaleChange={setScaleResolution}
-            target={config?.simpleMode.target ?? { resolution: 1080, fps: 30, bitrateMbps: 6 }}
+            target={config?.simpleMode.target ?? { resolution: 1080, fps: 30, bitrateMbps: 6, crf: 28 }}
           />
         ) : (
           <ExpertMode

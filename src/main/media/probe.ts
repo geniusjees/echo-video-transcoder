@@ -1,7 +1,7 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import type { SourceInfo } from '@shared/types';
-import { ffmpegPath, ffprobePath } from '../utils/paths';
+import { ffmpegPath, ffplayPath, ffprobePath } from '../utils/paths';
 
 interface ProbeStream {
   codec_name?: string;
@@ -119,34 +119,117 @@ function fsSafeSize(input: string): number {
   }
 }
 
+export function buildThumbnailArgs(
+  input: string,
+  seekSec = 1,
+  rotation?: { mode: 0 | 90 | 180 | 270; flip: 'none' | 'horizontal' | 'vertical' }
+): string[] {
+  const filters: string[] = ['scale=240:-2'];
+
+  if (rotation?.mode === 90) filters.push('transpose=1');
+  else if (rotation?.mode === 180) filters.push('transpose=2,transpose=2');
+  else if (rotation?.mode === 270) filters.push('transpose=2');
+
+  if (rotation?.flip === 'horizontal') filters.push('hflip');
+  if (rotation?.flip === 'vertical') filters.push('vflip');
+
+  return [
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-ss',
+    String(seekSec),
+    '-i',
+    input,
+    '-frames:v',
+    '1',
+    '-vf',
+    filters.join(','),
+    '-f',
+    'image2pipe',
+    '-vcodec',
+    'mjpeg',
+    'pipe:1'
+  ];
+}
+
+export function buildFfplayArgs(
+  input: string,
+  seekSec = 0,
+  rotation?: { mode: 0 | 90 | 180 | 270; flip: 'none' | 'horizontal' | 'vertical' },
+  title = 'preview'
+): string[] {
+  const filters: string[] = [];
+  if (rotation?.mode === 90) filters.push('transpose=1');
+  else if (rotation?.mode === 180) filters.push('transpose=2,transpose=2');
+  else if (rotation?.mode === 270) filters.push('transpose=2');
+  if (rotation?.flip === 'horizontal') filters.push('hflip');
+  if (rotation?.flip === 'vertical') filters.push('vflip');
+
+  const args = ['-hide_banner', '-loglevel', 'warning', '-autoexit', '-ss', String(seekSec), '-i', input];
+  if (filters.length) args.push('-vf', filters.join(','));
+  args.push('-window_title', title);
+  return args;
+}
+
+let ffplayProcess: ReturnType<typeof spawn> | null = null;
+
+export function openPreview(
+  input: string,
+  seekSec = 0,
+  rotation?: { mode: 0 | 90 | 180 | 270; flip: 'none' | 'horizontal' | 'vertical' }
+): void {
+  previewStop();
+  const bin = ffplayPath();
+  ffplayProcess = spawn(bin, buildFfplayArgs(input, seekSec, rotation, 'video-preview'), {
+    stdio: 'ignore',
+    windowsHide: true,
+    detached: false
+  });
+}
+
+export function previewSeek(
+  input: string,
+  seekSec = 0,
+  rotation?: { mode: 0 | 90 | 180 | 270; flip: 'none' | 'horizontal' | 'vertical' }
+): void {
+  if (!ffplayProcess || ffplayProcess.killed) {
+    openPreview(input, seekSec, rotation);
+    return;
+  }
+  previewStop();
+  openPreview(input, seekSec, rotation);
+}
+
+export function previewStop(): void {
+  if (!ffplayProcess || ffplayProcess.killed) {
+    ffplayProcess = null;
+    return;
+  }
+  try {
+    if (process.platform === 'win32') {
+      spawn('taskkill', ['/pid', String(ffplayProcess.pid), '/f', '/t'], { windowsHide: true });
+    } else {
+      ffplayProcess.kill('SIGTERM');
+    }
+  } catch {
+    // ignore
+  }
+  ffplayProcess = null;
+}
+
 /** 生成缩略图（dataURL），用于片段预览（§13.4） */
 export async function thumbnail(
   input: string,
   seekSec = 1,
-  configuredFfmpeg?: string
+  configuredFfmpeg?: string,
+  rotation?: { mode: 0 | 90 | 180 | 270; flip: 'none' | 'horizontal' | 'vertical' }
 ): Promise<string> {
   const bin = ffmpegPath(configuredFfmpeg);
   return new Promise((resolve) => {
     execFile(
       bin,
-      [
-        '-hide_banner',
-        '-loglevel',
-        'error',
-        '-ss',
-        String(seekSec),
-        '-i',
-        input,
-        '-frames:v',
-        '1',
-        '-vf',
-        'scale=240:-2',
-        '-f',
-        'image2pipe',
-        '-vcodec',
-        'mjpeg',
-        'pipe:1'
-      ],
+      buildThumbnailArgs(input, seekSec, rotation),
       { encoding: 'buffer', timeout: 30000, windowsHide: true, maxBuffer: 32 * 1024 * 1024 },
       (err, stdout) => {
         if (err || !stdout || !(stdout as Buffer).length) return resolve('');

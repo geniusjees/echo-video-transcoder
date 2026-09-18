@@ -57,8 +57,27 @@ const api = {
   // ---- 媒体 ----
   mediaProbe: (filePath: string): Promise<SourceInfo> =>
     ipcRenderer.invoke(IPC.MEDIA_PROBE, filePath),
-  thumbnail: (input: string, seekSec?: number): Promise<string> =>
-    ipcRenderer.invoke(IPC.THUMBNAIL, { input, seekSec }),
+  thumbnail: (
+    input: string,
+    seekSec?: number,
+    rotation?: { mode: 0 | 90 | 180 | 270; flip: 'none' | 'horizontal' | 'vertical' }
+  ): Promise<string> =>
+    ipcRenderer.invoke(IPC.THUMBNAIL, { input, seekSec, rotation }),
+  previewPlay: (
+    arg: {
+      input: string;
+      seekSec?: number;
+      rotation?: { mode: 0 | 90 | 180 | 270; flip: 'none' | 'horizontal' | 'vertical' };
+    }
+  ): Promise<boolean> => ipcRenderer.invoke(IPC.PREVIEW_PLAY, arg),
+  previewSeek: (
+    arg: {
+      input: string;
+      seekSec?: number;
+      rotation?: { mode: 0 | 90 | 180 | 270; flip: 'none' | 'horizontal' | 'vertical' };
+    }
+  ): Promise<boolean> => ipcRenderer.invoke(IPC.PREVIEW_SEEK, arg),
+  previewStop: (): Promise<boolean> => ipcRenderer.invoke(IPC.PREVIEW_STOP),
 
   // ---- 队列（C9）----
   queueAdd: (arg: {

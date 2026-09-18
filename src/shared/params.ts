@@ -4,6 +4,7 @@ import type {
   HWCapability,
   HWKind,
   ResolvedParams,
+  SimpleDecision,
   SourceInfo,
   VideoCodec
 } from './types';
@@ -24,17 +25,21 @@ export interface CapItem<T> {
   capped: boolean;
 }
 
-/** 分辨率封顶：目标 > 源 → 取源（不放大） */
-export function capResolution(targetHeight: number, sourceHeight: number): CapItem<number> {
-  if (sourceHeight > 0 && targetHeight > sourceHeight) {
+/** 分辨率封顶：目标 > 源 → 取源（除非显式允许放大） */
+export function capResolution(
+  targetHeight: number,
+  sourceHeight: number,
+  allowUpscale = false
+): CapItem<number> {
+  if (!allowUpscale && sourceHeight > 0 && targetHeight > sourceHeight) {
     return { value: sourceHeight, capped: true };
   }
   return { value: targetHeight, capped: false };
 }
 
-/** 帧率封顶：目标 > 源 → 取源（不插帧） */
-export function capFps(targetFps: number, sourceFps: number): CapItem<number> {
-  if (sourceFps > 0 && targetFps > sourceFps) {
+/** 帧率封顶：目标 > 源 → 取源（除非显式允许提高帧率） */
+export function capFps(targetFps: number, sourceFps: number, allowIncrease = false): CapItem<number> {
+  if (!allowIncrease && sourceFps > 0 && targetFps > sourceFps) {
     return { value: sourceFps, capped: true };
   }
   return { value: targetFps, capped: false };
@@ -49,9 +54,14 @@ export function capBitrate(targetMbps: number, sourceMbps?: number): CapItem<num
 }
 
 /** 对一整套参数统一过封顶（专家模式同样适用，§8） */
-export function applyCaps(params: ResolvedParams, source: SourceInfo): ResolvedParams {
-  const res = capResolution(params.resolution, source.height);
-  const fps = capFps(params.fps, source.fps);
+export function applyCaps(
+  params: ResolvedParams,
+  source: SourceInfo,
+  allowUpscale = false,
+  allowIncreaseFps = false
+): ResolvedParams {
+  const res = capResolution(params.resolution, source.height, allowUpscale);
+  const fps = capFps(params.fps, source.fps, allowIncreaseFps);
   const br = capBitrate(params.bitrateMbps, source.bitrateMbps);
 
   return {
@@ -59,11 +69,11 @@ export function applyCaps(params: ResolvedParams, source: SourceInfo): ResolvedP
     resolution: res.value,
     fps: fps.value,
     bitrateMbps: br.value,
-    capped: params.capped || res.capped || fps.capped || br.capped,
+    capped: res.capped || fps.capped || br.capped,
     caps: {
-      resolution: params.caps?.resolution || res.capped,
-      bitrate: params.caps?.bitrate || br.capped,
-      fps: params.caps?.fps || fps.capped
+      resolution: res.capped,
+      bitrate: br.capped,
+      fps: fps.capped
     }
   };
 }
@@ -139,16 +149,58 @@ export function pickEncoderName(
 // ---------------- 专家模式参数解析（§8） ----------------
 
 /** 用户值 → 过封顶（C6）→ 生效值（C7） */
+function normalizeCodecName(codec?: string): string {
+  return (codec ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function normalizeAudioName(audio?: string): string {
+  return (audio ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+export function decideExpert(
+  source: SourceInfo,
+  options: ExpertOptions,
+  capability?: HWCapability
+): SimpleDecision {
+  const params = resolveExpertParams(source, options, capability);
+
+  const sourceCodec = normalizeCodecName(source.codec);
+  const targetCodec = normalizeCodecName(params.codec === 'copy' ? source.codec : params.codec);
+  const sourceAudio = normalizeAudioName(source.audioCodec);
+  const targetAudio = normalizeAudioName(options.audioCodec === 'none' ? 'none' : options.audioCodec);
+
+  const sameResolution = source.height > 0 && params.resolution === source.height;
+  const sameFps = source.fps > 0 && params.fps === source.fps;
+  const sameCodec = !!sourceCodec && targetCodec === sourceCodec;
+  const sameAudio = !sourceAudio || !targetAudio || sourceAudio === targetAudio || options.audioCodec === 'none';
+
+  if (sameResolution && sameFps && sameCodec && sameAudio) {
+    return {
+      action: 'no-op',
+      reason: '专家模式参数与源视频一致，无需转码',
+      params: null
+    };
+  }
+
+  return {
+    action: 'transcode',
+    reason: '专家模式参数已改变，需要重新编码',
+    params
+  };
+}
+
 export function resolveExpertParams(
   source: SourceInfo,
   options: ExpertOptions,
   capability?: HWCapability
 ): ResolvedParams {
-  const resTarget =
-    options.resolutionMode === 'custom' && options.resolution
-      ? options.resolution
-      : source.height || 1080;
-  const fpsTarget = options.fpsMode === 'custom' && options.fps ? options.fps : source.fps || 30;
+  const rawResTarget =
+    options.resolutionMode === 'custom' && options.resolution ? options.resolution : source.height || 1080;
+  const allowUpscale = options.resolutionMode === 'custom' && (options.allowUpscale ?? false);
+  const resTarget = allowUpscale ? rawResTarget : Math.min(rawResTarget, source.height || rawResTarget);
+  const rawFpsTarget = options.fpsMode === 'custom' && options.fps ? options.fps : source.fps || 30;
+  const allowIncreaseFps = options.fpsMode === 'custom' && (options.allowIncreaseFps ?? false);
+  const fpsTarget = allowIncreaseFps ? rawFpsTarget : Math.min(rawFpsTarget, source.fps || rawFpsTarget);
 
   const ratio = source.height ? source.width / source.height : 16 / 9;
   const width = source.width || Math.round((resTarget * ratio) / 2) * 2;
@@ -186,5 +238,5 @@ export function resolveExpertParams(
     caps: { resolution: false, bitrate: false, fps: false }
   };
 
-  return applyCaps(params, source);
+  return applyCaps(params, source, allowUpscale, allowIncreaseFps);
 }

@@ -102,6 +102,16 @@ export default function ExpertMode({ selected, hardware, options, onChange, reso
                 </select>
               )}
             </div>
+            {options.resolutionMode === 'custom' && (
+              <label className="mt-2 flex items-center justify-between rounded-md border border-divider bg-soft px-2 py-1.5 text-xs text-strong">
+                <span>{t('expert.allowUpscale')}</span>
+                <input
+                  type="checkbox"
+                  checked={Boolean(options.allowUpscale)}
+                  onChange={(e) => onChange({ allowUpscale: e.target.checked })}
+                />
+              </label>
+            )}
           </div>
 
           <div className="col-span-2">
@@ -129,6 +139,16 @@ export default function ExpertMode({ selected, hardware, options, onChange, reso
                 </select>
               )}
             </div>
+            {options.fpsMode === 'custom' && (
+              <label className="mt-2 flex items-center justify-between rounded-md border border-divider bg-soft px-2 py-1.5 text-xs text-strong">
+                <span>{t('expert.allowIncreaseFps')}</span>
+                <input
+                  type="checkbox"
+                  checked={Boolean(options.allowIncreaseFps)}
+                  onChange={(e) => onChange({ allowIncreaseFps: e.target.checked })}
+                />
+              </label>
+            )}
           </div>
 
           <div>

@@ -5,6 +5,7 @@ import LanguageSwitch from './components/LanguageSwitch';
 import LogModal from './components/LogModal';
 import ThemeSwitch from './components/ThemeSwitch';
 import ConcatPage from './pages/ConcatPage';
+import EditPage from './pages/EditPage';
 import ExtractAudioPage from './pages/ExtractAudioPage';
 import RotatePage from './pages/RotatePage';
 import TranscodePage from './pages/TranscodePage';
@@ -13,12 +14,12 @@ import { useConfigStore } from './stores/configStore';
 import { useConcatStore } from './stores/concatStore';
 import { useDropStore } from './stores/dropStore';
 import { useImportStore } from './stores/importStore';
-import { useQueueStore } from './stores/queueStore';
+import { shouldPromptClearQueue, useQueueStore } from './stores/queueStore';
 import { useParamStore } from './stores/paramStore';
 import { initTheme, type ThemeMode } from './stores/themeStore';
 import { dragHasFiles, resolveDroppedPaths } from './utils/files';
 
-const TABS = ['transcode', 'rotate', 'audio', 'concat'] as const;
+const TABS = ['transcode', 'edit', 'rotate', 'audio', 'concat'] as const;
 type TabKey = (typeof TABS)[number];
 
 export default function App() {
@@ -83,6 +84,15 @@ export default function App() {
     const offL = window.api.onLog(onLog);
     const offS = window.api.onTaskStatus((p) => {
       onStatus(p);
+
+      const items = useQueueStore.getState().items;
+      if (shouldPromptClearQueue(items)) {
+        const confirmed = window.confirm(t('queue.clearCompletedConfirm'));
+        if (confirmed) {
+          useQueueStore.getState().clear();
+        }
+      }
+
       if (p.id.startsWith('concat-') && (p.status === 'done' || p.status === 'error')) {
         useConcatStore.setState({ busy: false });
       }
@@ -217,6 +227,7 @@ export default function App() {
           </div>
         )}
         {tab === 'transcode' && <TranscodePage />}
+        {tab === 'edit' && <EditPage />}
         {tab === 'rotate' && <RotatePage />}
         {tab === 'audio' && <ExtractAudioPage />}
         {tab === 'concat' && <ConcatPage />}

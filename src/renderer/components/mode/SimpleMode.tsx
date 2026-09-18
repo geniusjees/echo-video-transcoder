@@ -8,7 +8,7 @@ interface Props {
   selected?: QueueItem | null;
   scaleResolution: boolean;
   onScaleChange: (v: boolean) => void;
-  target: { resolution: number; fps: number; bitrateMbps: number };
+  target: { resolution: number; fps: number; bitrateMbps: number; crf?: number };
 }
 
 /** 普通（简单）模式面板（§13.2） */
@@ -19,12 +19,14 @@ export default function SimpleMode({
   target
 }: Props) {
   const t = useT();
-  const vars = { r: target.resolution, b: target.bitrateMbps };
+  const crf = target.crf ?? 28;
+  const vars = { r: target.resolution, b: target.bitrateMbps, c: crf };
+  const rateText = `CRF ${crf}`;
 
   const rules = (
     <div className="space-y-1.5">
       <p className="font-medium text-strong">
-        {target.resolution}p / {target.fps}fps / {target.bitrateMbps}Mbps / H.265 (HEVC)
+        {target.resolution}p / {target.fps}fps / {rateText} / H.265 (HEVC)
       </p>
       <ul className="space-y-1 text-body">
         <li>• {t('simple.rule1', vars)}</li>
@@ -49,7 +51,7 @@ export default function SimpleMode({
 
         <Tooltip content={rules} width={430}>
           <p className="mt-1.5 cursor-help text-xs text-muted">
-            {target.resolution}p / {target.fps}fps / {target.bitrateMbps}Mbps / H.265 (HEVC)
+            {target.resolution}p / {target.fps}fps / {rateText} / H.265 (HEVC)
           </p>
         </Tooltip>
       </div>

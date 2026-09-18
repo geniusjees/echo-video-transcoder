@@ -45,6 +45,8 @@ export interface Target {
   resolution: number;
   fps: number;
   bitrateMbps: number;
+  /** 普通模式默认压制质量：CRF 28 */
+  crf?: number;
   codec: VideoCodec;
 }
 
@@ -156,8 +158,12 @@ export interface ExpertOptions {
   resolutionMode: ResolutionMode;
   /** resolutionMode = custom 时的高度档位 */
   resolution?: number;
+  /** resolutionMode = custom 且 target > source 时，是否允许放大 */
+  allowUpscale?: boolean;
   fpsMode: FpsMode;
   fps?: number;
+  /** fpsMode = custom 且 target > source 时，是否允许提高帧率 */
+  allowIncreaseFps?: boolean;
   bitrateMode: BitrateMode;
   crf?: number;
   bitrateMbps?: number;
@@ -180,10 +186,30 @@ export interface Preset {
 
 // ---------------- 任务 ----------------
 
-export type TaskKind = 'transcode' | 'rotate' | 'extractAudio' | 'concat';
+export type TaskKind = 'transcode' | 'rotate' | 'extractAudio' | 'concat' | 'edit';
 
 export type RotateMode = 0 | 90 | 180 | 270;
 export type FlipMode = 'none' | 'horizontal' | 'vertical';
+
+export interface EditCutSegment {
+  startSec: number;
+  endSec: number;
+}
+
+export interface EditBackgroundAudio {
+  input: string;
+  originalVolume: number;
+  backgroundVolume: number;
+}
+
+export interface EditOptions {
+  trimStartSec?: number;
+  trimEndSec?: number;
+  cutSegments?: EditCutSegment[];
+  rotation?: RotateOptions;
+  transcode?: boolean;
+  backgroundAudio?: EditBackgroundAudio;
+}
 
 export interface RotateOptions {
   mode: RotateMode;
@@ -213,6 +239,7 @@ export interface TaskPayload {
   rotate?: RotateOptions;
   audio?: AudioExtractOptions;
   concat?: { segments: Segment[]; plan: ConcatPlan };
+  edit?: EditOptions;
 }
 
 export type TaskStatus =
@@ -272,6 +299,7 @@ export interface SimpleModeConfig {
     resolution: number;
     fps: number;
     bitrateMbps: number;
+    crf?: number;
   };
   scaleResolution: boolean;
   autoBitrateBaseMbps: number;
@@ -280,6 +308,8 @@ export interface SimpleModeConfig {
 export interface ExpertDefaultsConfig {
   videoCodec: VideoCodec;
   resolutionMode: ResolutionMode;
+  allowUpscale?: boolean;
+  allowIncreaseFps?: boolean;
   fpsMode: FpsMode;
   bitrateMode: BitrateMode;
   crf: number;

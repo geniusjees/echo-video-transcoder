@@ -36,6 +36,10 @@
   "build": {
     "appId": "com.echo.videotranscoder",
     "productName": "Echo Video Transcoder",
+    "icon": "build/icon.png",
+    "electronDownload": {
+      "mirror": "https://cdn.npmmirror.com/binaries/electron/"
+    },
     "files": [
       "dist/**"
     ],
@@ -50,7 +54,8 @@
       }
     ],
     "win": {
-      "target": "nsis"
+      "target": ["nsis", "portable"],
+      "signAndEditExecutable": false
     },
     "mac": {
       "target": "dmg",

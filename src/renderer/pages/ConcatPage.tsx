@@ -102,7 +102,7 @@ export default function ConcatPage() {
             className="input"
             value={outputName}
             onChange={(e) => setOutputName(e.target.value)}
-            placeholder="merged.mp4"
+            placeholder={t('concat.outputNamePlaceholder')}
           />
         </div>
 
