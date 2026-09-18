@@ -7,6 +7,11 @@ import { configPath, ffmpegPath, ffprobePath } from './utils/paths';
 
 const isDev = !app.isPackaged;
 
+/** 应用图标：打包后取 resources/icon.png，开发时取项目 build/icon.png */
+const appIconPath = app.isPackaged
+  ? path.join(process.resourcesPath, 'icon.png')
+  : path.join(__dirname, '../../build/icon.png');
+
 let mainWindow: BrowserWindow | null = null;
 
 function createWindow(): BrowserWindow {
@@ -16,6 +21,7 @@ function createWindow(): BrowserWindow {
     minWidth: 1024,
     minHeight: 700,
     title: 'Echo Video Transcoder',
+    icon: appIconPath,
     // 隐藏 File / Edit 等原生菜单栏
     autoHideMenuBar: true,
     // 与主题一致，避免启动白/黑闪屏

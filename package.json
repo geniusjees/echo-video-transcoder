@@ -37,11 +37,18 @@
     "appId": "com.echo.videotranscoder",
     "productName": "Echo Video Transcoder",
     "icon": "build/icon.png",
+    "directories": {
+      "output": "release"
+    },
     "electronDownload": {
       "mirror": "https://cdn.npmmirror.com/binaries/electron/"
     },
     "files": [
-      "dist/**"
+      "dist/**",
+      "!dist/win-unpacked/**",
+      "!dist/**/*.exe",
+      "!dist/**/*.blockmap",
+      "!dist/**/*.7z"
     ],
     "extraResources": [
       {
@@ -51,11 +58,14 @@
       {
         "from": "config.json",
         "to": "."
+      },
+      {
+        "from": "build/icon.png",
+        "to": "icon.png"
       }
     ],
     "win": {
-      "target": ["nsis", "portable"],
-      "signAndEditExecutable": false
+      "target": ["nsis", "portable"]
     },
     "mac": {
       "target": "dmg",

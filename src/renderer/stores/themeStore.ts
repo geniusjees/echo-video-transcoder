@@ -28,8 +28,9 @@ function applyToDom(effective: 'dark' | 'light'): void {
 }
 
 export const useThemeStore = create<ThemeState>((set, get) => ({
-  mode: 'dark',
-  effective: 'dark',
+  /** 默认跟随系统主题 */
+  mode: 'system',
+  effective: resolve('system'),
 
   setMode: (mode) => {
     const effective = resolve(mode);

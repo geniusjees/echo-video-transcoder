@@ -157,7 +157,8 @@ export const DEFAULT_CONFIG: AppConfig = {
   version: '1.0',
   /** 'auto' = 跟随系统语言（匹配不到则英语） */
   language: 'auto',
-  theme: 'dark',
+  /** 'system' = 默认跟随系统主题 */
+  theme: 'system',
 
   paths: {
     ffmpeg: '',

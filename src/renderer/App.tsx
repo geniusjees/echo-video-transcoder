@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import appIcon from './assets/icon.png';
 import HardwareBadge from './components/HardwareBadge';
 import ImportProgress from './components/ImportProgress';
 import LanguageSwitch from './components/LanguageSwitch';
@@ -73,7 +74,7 @@ export default function App() {
   useEffect(() => {
     if (config) {
       initFromConfig(config, config.simpleMode.scaleResolution);
-      initTheme((config.theme ?? 'dark') as ThemeMode);
+      initTheme((config.theme ?? 'system') as ThemeMode);
       if (config.paths.outputDir) setConcatOutputDir(config.paths.outputDir);
     }
   }, [config, initFromConfig, setConcatOutputDir]);
@@ -190,7 +191,12 @@ export default function App() {
       {/* 顶部栏 */}
       <header className="flex shrink-0 items-center justify-between border-b border-surface-600 bg-surface-800 px-5 py-3">
         <div className="flex items-center gap-2">
-          <span className="text-lg">🎞</span>
+          <img
+            src={appIcon}
+            alt=""
+            draggable={false}
+            className="h-6 w-6 rounded object-contain"
+          />
           <span className="text-sm font-semibold tracking-wide text-strong">{t('app.name')}</span>
           <span className="chip bg-surface-700 text-muted">v0.1</span>
         </div>
