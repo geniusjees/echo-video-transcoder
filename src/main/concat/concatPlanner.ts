@@ -1,4 +1,5 @@
 import { AUDIO_UNIFY, TARGET } from '@shared/constants';
+import { formatConcatReason } from '@shared/concatI18n';
 import type {
   ConcatPlan,
   HWCapability,
@@ -33,31 +34,44 @@ const fpsClose = (a: number, b: number): boolean => Math.abs(a - b) < 0.05;
 
 /** 判断所有片段参数是否一致（可 -c copy 直拼） */
 export function areSegmentsUniform(segments: Segment[]): { equal: boolean; reason: string } {
-  if (segments.length === 0) return { equal: false, reason: '没有片段' };
-  if (segments.length === 1) return { equal: true, reason: '单片段' };
+  if (segments.length === 0) return { equal: false, reason: 'No segments' };
+  if (segments.length === 1) return { equal: true, reason: 'Single segment' };
 
   const ref = segments[0].source;
   for (let i = 1; i < segments.length; i++) {
     const s = segments[i].source;
-    if (segments[i].trim) return { equal: false, reason: '存在片段裁剪，需重编码对齐' };
+    if (segments[i].trim) return { equal: false, reason: 'Trimmed segments require re-encoding alignment' };
     if (s.height !== ref.height || s.width !== ref.width) {
-      return { equal: false, reason: `分辨率不一致（${ref.width}×${ref.height} vs ${s.width}×${s.height}）` };
+      return {
+        equal: false,
+        reason: formatConcatReason('en', {
+          equal: false,
+          fromW: ref.width,
+          fromH: ref.height,
+          toW: s.width,
+          toH: s.height,
+          res: 0,
+          fps: 0,
+          bitrate: 0,
+          codec: ''
+        })
+      };
     }
     if (!fpsClose(s.fps, ref.fps)) {
-      return { equal: false, reason: `帧率不一致（${ref.fps} vs ${s.fps}）` };
+      return { equal: false, reason: `Frame rate mismatch (${ref.fps} vs ${s.fps})` };
     }
     if ((s.codec ?? '') !== (ref.codec ?? '')) {
-      return { equal: false, reason: `编码不一致（${ref.codec} vs ${s.codec}）` };
+      return { equal: false, reason: `Codec mismatch (${ref.codec} vs ${s.codec})` };
     }
     if (s.hasAudio !== ref.hasAudio) {
-      return { equal: false, reason: '部分片段无音轨，需补静音对齐' };
+      return { equal: false, reason: 'Some clips are missing audio; silence padding is required' };
     }
     if (s.hasAudio && s.sampleRate !== AUDIO_UNIFY.sampleRate) {
-      return { equal: false, reason: `采样率非 ${AUDIO_UNIFY.sampleRate}Hz，需统一` };
+      return { equal: false, reason: `Sample rate is not ${AUDIO_UNIFY.sampleRate}Hz; normalization is required` };
     }
   }
-  if (segments[0].trim) return { equal: false, reason: '存在片段裁剪，需重编码对齐' };
-  return { equal: true, reason: '参数一致→纯拼接（硬切直连，-c copy）' };
+  if (segments[0].trim) return { equal: false, reason: 'Trimmed segments require re-encoding alignment' };
+  return { equal: true, reason: formatConcatReason('en', { equal: true }) };
 }
 
 /** 计算统一参数（§7 统一配置 + C6 封顶） */
@@ -143,11 +157,23 @@ export function planConcat(segments: Segment[], opts: PlanOptions): ConcatPlan {
   const estimate: ConcatPlan['estimate'] =
     strategy === 'copy' ? 'fast' : totalDurationSec > 900 ? 'slow' : 'normal';
 
+  const mismatch = !check.equal
+    ? formatConcatReason('en', {
+        equal: false,
+        fromW: segments[0]?.source.width ?? 0,
+        fromH: segments[0]?.source.height ?? 0,
+        toW: segments.find((s) => s.source.width !== segments[0].source.width || s.source.height !== segments[0].source.height)?.source.width ?? segments[0]?.source.width ?? 0,
+        toH: segments.find((s) => s.source.width !== segments[0].source.width || s.source.height !== segments[0].source.height)?.source.height ?? segments[0]?.source.height ?? 0,
+        res: uniform.resolution,
+        fps: uniform.fps,
+        bitrate: uniform.bitrateMbps,
+        codec: uniform.codec
+      })
+    : formatConcatReason('en', { equal: true });
+
   return {
     strategy,
-    reason: check.equal
-      ? check.reason
-      : `${check.reason} → 转码对齐（统一 ${uniform.resolution}p / ${uniform.fps}fps / ${uniform.bitrateMbps}Mbps / ${uniform.codec.toUpperCase()}）`,
+    reason: mismatch,
     uniform,
     audio: {
       sampleRate: AUDIO_UNIFY.sampleRate,

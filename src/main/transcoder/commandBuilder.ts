@@ -61,7 +61,9 @@ function buildEditVideoFilters(opts: {
   if (opts.trimStartSec !== undefined || opts.trimEndSec !== undefined) {
     const start = opts.trimStartSec ?? 0;
     const end = opts.trimEndSec ?? Number.MAX_SAFE_INTEGER;
-    filters.push(`trim=start=${start}:end=${end}`);
+    if (start > 0 && end < Number.MAX_SAFE_INTEGER) {
+      // 中间保留段由 ffmpeg 的 -ss/-t 处理，避免使用错误的绝对时间轴导致时长偏移和卡顿。
+    }
   }
 
   if (opts.rotation?.mode === 90) filters.push('transpose=1');
@@ -254,48 +256,43 @@ export function buildEditArgs(
     cutSegments?: Array<{ startSec: number; endSec: number }>;
     rotation?: { mode: 0 | 90 | 180 | 270; flip: 'none' | 'horizontal' | 'vertical'; metadataOnly?: boolean };
     transcode?: boolean;
-    backgroundAudio?: { input: string; originalVolume: number; backgroundVolume: number };
   },
   source: SourceInfo,
   ctx: CommandContext = {}
 ): string[] {
   const args: string[] = ['-hide_banner', '-y', '-progress', 'pipe:1', '-nostats'];
-  if (opts.trimStartSec && opts.trimStartSec > 0) args.push('-ss', String(opts.trimStartSec));
-  if (opts.trimEndSec && opts.trimEndSec > (opts.trimStartSec ?? 0)) args.push('-to', String(opts.trimEndSec + (opts.trimStartSec ?? 0)));
-  args.push('-i', input);
-
-  const bgInput = opts.backgroundAudio?.input;
-  if (bgInput) args.push('-i', bgInput);
+  const hasCutSegments = Boolean(opts.cutSegments?.length);
+  const trimStart = !hasCutSegments && typeof opts.trimStartSec === 'number' ? opts.trimStartSec : undefined;
+  const trimEnd = !hasCutSegments && typeof opts.trimEndSec === 'number' ? opts.trimEndSec : undefined;
 
   const filters = buildEditVideoFilters({
-    trimStartSec: opts.trimStartSec,
-    trimEndSec: opts.trimEndSec,
+    trimStartSec: hasCutSegments ? undefined : opts.trimStartSec,
+    trimEndSec: hasCutSegments ? undefined : opts.trimEndSec,
     rotation: opts.rotation,
     cutSegments: opts.cutSegments
   });
-  const needsReencode = Boolean(filters.length) || Boolean(opts.transcode) || Boolean(bgInput);
+  const isSimpleTrim = !hasCutSegments && !filters.length && !opts.transcode;
 
-  if (needsReencode) {
-    args.push('-map', '0:v:0');
-    if (filters.length) args.push('-vf', filters.join(','));
-    if (bgInput) {
-      args.push('-filter_complex', buildEditAudioFilter(opts.backgroundAudio));
-      args.push('-map', '[aout]');
-    } else {
-      args.push('-map', '0:a:0?');
-    }
-    args.push('-sn', '-dn', '-c:v', 'libx264', '-preset', 'medium', '-crf', '23', '-pix_fmt', 'yuv420p');
-    if (!bgInput) args.push('-c:a', 'aac', '-movflags', '+faststart');
-    else args.push('-c:a', 'aac', '-shortest', '-movflags', '+faststart');
-  } else {
-    args.push('-map', '0:v:0', '-map', '0:a:0?', '-sn', '-dn', '-c', 'copy');
+  if (typeof trimStart === 'number' && trimStart > 0) {
+    args.push('-ss', String(trimStart));
+  }
+  args.push('-i', input);
+
+  if (typeof trimEnd === 'number' && trimEnd > (trimStart ?? 0)) {
+    const duration = trimEnd - (trimStart ?? 0);
+    args.push('-t', String(Math.max(duration, 0)));
   }
 
-  if (bgInput && !filters.length) {
-    args.push('-filter_complex', buildEditAudioFilter(opts.backgroundAudio));
-    args.push('-map', '[aout]');
-    args.push('-shortest', '-c:a', 'aac');
+  if (isSimpleTrim) {
+    args.push('-map', '0:v:0', '-map', '0:a:0?', '-sn', '-dn', '-c', 'copy', '-avoid_negative_ts', 'make_zero', '-movflags', '+faststart');
+    args.push(output);
+    return args;
   }
+
+  if (filters.length) args.push('-vf', filters.join(','));
+  args.push('-map', '0:v:0', '-map', '0:a:0?');
+  args.push('-sn', '-dn', '-c:v', 'libx264', '-preset', 'medium', '-crf', '23', '-pix_fmt', 'yuv420p');
+  args.push('-c:a', 'aac', '-movflags', '+faststart', '-avoid_negative_ts', 'make_zero');
 
   args.push(output);
   return args;
@@ -329,8 +326,7 @@ export function buildArgsForTask(
           trimEndSec: payload.edit?.trimEndSec,
           cutSegments: payload.edit?.cutSegments,
           rotation: payload.edit?.rotation,
-          transcode: payload.edit?.transcode,
-          backgroundAudio: payload.edit?.backgroundAudio
+          transcode: payload.edit?.transcode
         },
         source,
         ctx

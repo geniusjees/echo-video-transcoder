@@ -1,5 +1,6 @@
+import { formatConcatReason } from '@shared/concatI18n';
 import type { ConcatPlan } from '@shared/types';
-import { useT } from '../../i18n';
+import { useI18nStore, useT } from '../../i18n';
 import { codecLabel, formatDuration } from '../../utils/format';
 
 interface Props {
@@ -10,6 +11,7 @@ interface Props {
 /** 拼接方案摘要：纯拼接 / 转码对齐 + 音频统一说明（§13.4） */
 export default function ConcatPlanSummary({ plan, segments }: Props) {
   const t = useT();
+  const locale = useI18nStore((s) => s.locale);
 
   if (!plan) {
     return <div className="card text-sm text-faint">{t('concat.planEmpty')}</div>;
@@ -19,6 +21,25 @@ export default function ConcatPlanSummary({ plan, segments }: Props) {
   const silenceNames = plan.silenceSegments
     .map((id) => segments.find((s) => s.id === id)?.name)
     .filter(Boolean) as string[];
+  const sourceA = plan.segments[0]?.source;
+  const mismatched = plan.segments.find(
+    (item) =>
+      item.source.width !== sourceA?.width || item.source.height !== sourceA?.height ||
+      Math.abs(item.source.fps - (sourceA?.fps ?? 0)) > 0.05
+  )?.source;
+  const decisionText = copy
+    ? formatConcatReason(locale, { equal: true })
+    : formatConcatReason(locale, {
+        equal: false,
+        fromW: sourceA?.width ?? 0,
+        fromH: sourceA?.height ?? 0,
+        toW: mismatched?.width ?? sourceA?.width ?? 0,
+        toH: mismatched?.height ?? sourceA?.height ?? 0,
+        res: plan.uniform.resolution,
+        fps: plan.uniform.fps,
+        bitrate: plan.uniform.bitrateMbps,
+        codec: plan.uniform.codec
+      });
 
   return (
     <div className="card">
@@ -34,7 +55,7 @@ export default function ConcatPlanSummary({ plan, segments }: Props) {
       <ul className="space-y-1 text-xs text-body">
         <li>
           • {t('concat.decision')}
-          {plan.reason}
+          {decisionText}
         </li>
         <li>
           • {t('concat.uniform')}
@@ -67,7 +88,6 @@ export default function ConcatPlanSummary({ plan, segments }: Props) {
               : t('concat.estimateSlow')}
           ）
         </li>
-        <li className="text-faint">• {t('concat.noTransition')}</li>
       </ul>
     </div>
   );

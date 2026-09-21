@@ -1,11 +1,11 @@
 {
   "version": "1.0",
-  "language": "zh-CN",
+  "language": "auto",
   "theme": "system",
   "paths": {
     "ffmpeg": "",
     "ffprobe": "",
-    "outputDir": "\\\\192.168.3.254\\download2\\XJJ\\欧美"
+    "outputDir": "E:\\"
   },
   "transcode": {
     "parallelJobs": 1,

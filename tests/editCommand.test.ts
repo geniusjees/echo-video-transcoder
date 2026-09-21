@@ -4,7 +4,7 @@ import { buildFfplayArgs, buildThumbnailArgs } from '../src/main/media/probe';
 import type { TaskPayload } from '@shared/types';
 
 describe('编辑任务命令构建', () => {
-  it('应生成 trim / cut / bg mix 相关参数', () => {
+  it('应按关键帧对齐的直接剪切方式生成参数', () => {
     const payload: TaskPayload = {
       id: 'edit-1',
       kind: 'edit',
@@ -14,14 +14,8 @@ describe('编辑任务命令构建', () => {
       edit: {
         trimStartSec: 2,
         trimEndSec: 24,
-        cutSegments: [{ startSec: 8, endSec: 10 }, { startSec: 18, endSec: 20 }],
-        rotation: { mode: 90, flip: 'none', metadataOnly: false },
-        transcode: true,
-        backgroundAudio: {
-          input: 'bg.mp3',
-          originalVolume: 0.6,
-          backgroundVolume: 0.9
-        }
+        cutSegments: [],
+        transcode: false
       }
     };
 
@@ -35,11 +29,18 @@ describe('编辑任务命令构建', () => {
     });
 
     const joined = args.join(' ');
-    expect(joined).toContain('trim=');
-    expect(joined).toContain('select=');
-    expect(joined).toContain('amix');
-    expect(joined).toContain('transpose=1');
-    expect(joined).toContain('bg.mp3');
+    expect(joined).toContain('-ss');
+    expect(joined).toContain('2');
+    expect(joined).toContain('-i in.mp4');
+    expect(joined).toContain('-t');
+    expect(joined).toContain('22');
+    expect(joined).toContain('-c');
+    expect(joined).toContain('copy');
+    expect(joined).toContain('-avoid_negative_ts');
+    expect(joined).toContain('make_zero');
+    expect(joined).toContain('+faststart');
+    expect(joined).not.toContain('amix');
+    expect(joined).not.toContain('bg.mp3');
   });
 
   it('应在预览抓帧时带上旋转和镜像滤镜', () => {

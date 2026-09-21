@@ -196,19 +196,12 @@ export interface EditCutSegment {
   endSec: number;
 }
 
-export interface EditBackgroundAudio {
-  input: string;
-  originalVolume: number;
-  backgroundVolume: number;
-}
-
 export interface EditOptions {
   trimStartSec?: number;
   trimEndSec?: number;
   cutSegments?: EditCutSegment[];
   rotation?: RotateOptions;
   transcode?: boolean;
-  backgroundAudio?: EditBackgroundAudio;
 }
 
 export interface RotateOptions {

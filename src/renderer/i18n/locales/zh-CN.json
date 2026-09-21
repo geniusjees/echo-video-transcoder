@@ -225,6 +225,8 @@
   "edit.audio.volumeOriginal": "原音量",
   "edit.audio.volumeBackground": "背景音量",
   "edit.start": "开始编辑",
+  "edit.progress.running": "编辑进度",
+  "edit.completed": "编辑已完成",
   "language.switchTitle": "语言",
   "language.auto": "自动（{{label}}）",
   "concat.outputNamePlaceholder": "merged.mp4",

@@ -225,6 +225,8 @@
   "edit.audio.volumeOriginal": "Original volume",
   "edit.audio.volumeBackground": "Background volume",
   "edit.start": "Start edit",
+  "edit.progress.running": "Edit progress",
+  "edit.completed": "Edit completed",
   "language.switchTitle": "Language",
   "language.auto": "Auto ({{label}})",
   "concat.outputNamePlaceholder": "merged.mp4",

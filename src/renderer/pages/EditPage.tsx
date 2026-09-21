@@ -5,6 +5,7 @@ import { useConfigStore } from '../stores/configStore';
 import { useQueueStore } from '../stores/queueStore';
 import { useDropHandler } from '../hooks/useDropHandler';
 import { useT } from '../i18n';
+import { createHoldController } from '../utils/editHold';
 import { makeOutputPath } from '../utils/output';
 
 function clamp(value: number, min: number, max: number) {
@@ -33,20 +34,19 @@ export default function EditPage() {
   const setOutputDirForAll = useQueueStore((s) => s.setOutputDirForAll);
   const start = useQueueStore((s) => s.start);
   const busy = useQueueStore((s) => s.busy);
+  const setNotice = useConfigStore((s) => s.setNotice);
 
-  const [subMenu, setSubMenu] = useState<'trim' | 'rotate' | 'transcode' | 'audio' | null>('trim');
+  const [subMenu, setSubMenu] = useState<'trim' | 'rotate' | 'transcode' | null>('trim');
   const [trimStart, setTrimStart] = useState(0);
   const [trimEnd, setTrimEnd] = useState(0);
   const [cutSegments, setCutSegments] = useState<EditCutSegment[]>([]);
   const [rotationMode, setRotationMode] = useState<RotateMode>(0);
   const [flipMode, setFlipMode] = useState<FlipMode>('none');
   const [transcodeEnabled, setTranscodeEnabled] = useState(false);
-  const [bgAudioInput, setBgAudioInput] = useState('');
-  const [bgAudioEnabled, setBgAudioEnabled] = useState(false);
-  const [originalVolume, setOriginalVolume] = useState(1);
-  const [backgroundVolume, setBackgroundVolume] = useState(0.3);
   const [currentTime, setCurrentTime] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const queueItem = useQueueStore((s) => (selectedId ? s.items.find((item) => item.id === selectedId) ?? null : null));
+  const itemProgress = useQueueStore((s) => (selectedId ? s.progress[selectedId] : undefined));
   const [previewFrame, setPreviewFrame] = useState('');
   const [previewLoading, setPreviewLoading] = useState(false);
   const [playing, setPlaying] = useState(false);
@@ -61,7 +61,10 @@ export default function EditPage() {
   const duration = selected?.source.durationSec || 0;
   const fps = selected?.source.fps || 30;
   const frameStep = 1 / Math.max(fps, 1);
-  const holdRef = useRef<number | null>(null);
+  const stepHoldRef = useRef<ReturnType<typeof createHoldController> | null>(null);
+  const editDoneNotifiedRef = useRef<string | null>(null);
+  const editProgressVisible = Boolean(selected && queueItem && (queueItem.status === 'pending' || queueItem.status === 'running'));
+  const editProgress = itemProgress?.percent ?? 0;
 
   useEffect(() => {
     if (!selected) return;
@@ -138,29 +141,42 @@ export default function EditPage() {
   }, [duration, frameStep, playing, selected]);
 
   useEffect(() => {
+    const controller = createHoldController({
+      intervalMs: 80,
+      onStep: (direction) => {
+        setCurrentTime((prev) => clamp(prev + direction * frameStep, 0, duration));
+      }
+    });
+    stepHoldRef.current = controller;
+
     const onKeyDown = (event: KeyboardEvent) => {
       if (!selected || !['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
       event.preventDefault();
-      const direction = event.key === 'ArrowRight' ? 1 : -1;
-      const apply = () => setCurrentTime((prev) => clamp(prev + direction * frameStep, 0, duration));
-      apply();
-      if (holdRef.current) window.clearInterval(holdRef.current);
-      holdRef.current = window.setInterval(apply, 80);
+      controller.start(event.key === 'ArrowRight' ? 1 : -1);
     };
     const onKeyUp = () => {
-      if (holdRef.current) {
-        window.clearInterval(holdRef.current);
-        holdRef.current = null;
-      }
+      controller.stop();
     };
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
-      if (holdRef.current) clearInterval(holdRef.current);
+      controller.stop();
     };
   }, [duration, frameStep, selected]);
+
+  useEffect(() => {
+    if (!selected || !queueItem || queueItem.id !== selected.id) return;
+    if (queueItem.status === 'done' && editDoneNotifiedRef.current !== queueItem.id) {
+      editDoneNotifiedRef.current = queueItem.id;
+      setNotice(t('edit.completed'));
+      window.alert(t('edit.completed'));
+    }
+    if (queueItem.status === 'pending' || queueItem.status === 'running') {
+      editDoneNotifiedRef.current = null;
+    }
+  }, [queueItem, selected, setNotice, t]);
 
   const handlePlayToggle = () => {
     if (!selected) return;
@@ -215,10 +231,9 @@ export default function EditPage() {
     const changes: string[] = [];
     if (rotationMode !== 0 || flipMode !== 'none') changes.push(t('edit.summary.rotate'));
     if (transcodeEnabled) changes.push(t('edit.summary.transcode'));
-    if (bgAudioEnabled || bgAudioInput) changes.push(t('edit.summary.audio'));
-    if (cutSegments.length > 0 || trimStart > 0 || trimEnd < duration) changes.push(t('edit.summary.trim'));
+    if (cutSegments.length > 0) changes.push(t('edit.summary.trim'));
     return changes;
-  }, [bgAudioEnabled, bgAudioInput, cutSegments.length, duration, flipMode, rotationMode, t, transcodeEnabled, trimEnd, trimStart]);
+  }, [cutSegments.length, duration, flipMode, rotationMode, t, transcodeEnabled]);
 
   const trimSelectionVisible = trimStart !== trimEnd && trimEnd > trimStart && duration > 0;
 
@@ -227,31 +242,65 @@ export default function EditPage() {
     ...(trimSelectionVisible ? [{ start: trimStart / Math.max(duration, 1), end: trimEnd / Math.max(duration, 1), kind: 'trim' as const }] : [])
   ];
 
-  const addCutSegment = () => {
-    if (!selected || trimStart >= trimEnd) return;
-    setCutSegments((prev) => [...prev, { startSec: trimStart, endSec: trimEnd }]);
+  const setTrimStartAtCurrent = () => {
+    const nextStart = Math.max(0, currentTime - frameStep);
+    setTrimStart(Math.min(nextStart, trimEnd));
   };
 
-  const keepMiddleSegment = () => {
-    if (!selected || trimStart >= trimEnd) return;
-    const start = Math.min(trimStart, trimEnd);
-    const end = Math.max(trimStart, trimEnd);
-    const nextCuts: EditCutSegment[] = [];
-    if (start > 0) nextCuts.push({ startSec: 0, endSec: start });
-    if (end < duration) nextCuts.push({ startSec: end, endSec: duration });
-    setCutSegments((prev) => [...prev, ...nextCuts]);
+  const setTrimEndAtCurrent = () => {
+    const nextEnd = Math.min(duration, currentTime + frameStep);
+    setTrimEnd(Math.max(nextEnd, trimStart));
   };
 
-  const removeLatestCutSegment = () => {
-    setCutSegments((prev) => prev.slice(0, -1));
+  const trimBarRef = useRef<HTMLDivElement | null>(null);
+  const trimDragRef = useRef<{ mode: 'start' | 'end' | 'move'; startPointerSec: number; startTrimStart: number; startTrimEnd: number } | null>(null);
+
+  const beginTrimDrag = (mode: 'start' | 'end' | 'move', clientX: number) => {
+    if (!trimBarRef.current) return;
+    const rect = trimBarRef.current.getBoundingClientRect();
+    const startPointerSec = ((clientX - rect.left) / Math.max(rect.width, 1)) * duration;
+    trimDragRef.current = { mode, startPointerSec, startTrimStart: trimStart, startTrimEnd: trimEnd };
   };
 
-  const clearAllCutSegments = () => {
-    setCutSegments([]);
-  };
+  useEffect(() => {
+    const onMove = (event: PointerEvent) => {
+      if (!trimBarRef.current || !trimDragRef.current) return;
+      const rect = trimBarRef.current.getBoundingClientRect();
+      const nextPointerSec = ((event.clientX - rect.left) / Math.max(rect.width, 1)) * duration;
+      const { mode, startPointerSec, startTrimStart, startTrimEnd } = trimDragRef.current;
+      const delta = nextPointerSec - startPointerSec;
+
+      if (mode === 'start') {
+        setTrimStart(clamp(startTrimStart + delta, 0, trimEnd));
+        return;
+      }
+      if (mode === 'end') {
+        setTrimEnd(clamp(startTrimEnd + delta, trimStart, duration));
+        return;
+      }
+
+      const selectionWidth = startTrimEnd - startTrimStart;
+      const nextStart = clamp(startTrimStart + delta, 0, Math.max(duration - selectionWidth, 0));
+      const nextEnd = nextStart + selectionWidth;
+      setTrimStart(nextStart);
+      setTrimEnd(nextEnd);
+    };
+
+    const onUp = () => {
+      trimDragRef.current = null;
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+  }, [duration, trimEnd, trimStart]);
 
   const onStart = async () => {
     if (!selected) return;
+    editDoneNotifiedRef.current = null;
     await start({
       kind: 'edit',
       filter: () => true,
@@ -264,12 +313,9 @@ export default function EditPage() {
         edit: {
           trimStartSec: trimStart,
           trimEndSec: trimEnd,
-          cutSegments,
+          cutSegments: [],
           rotation: { mode: rotationMode, flip: flipMode, metadataOnly: false },
-          transcode: transcodeEnabled,
-          backgroundAudio: bgAudioEnabled && bgAudioInput
-            ? { input: bgAudioInput, originalVolume, backgroundVolume }
-            : undefined
+          transcode: transcodeEnabled
         }
       })
     });
@@ -345,8 +391,34 @@ export default function EditPage() {
                 className="w-full accent-brand-500"
               />
               <div className="flex items-center gap-2">
-                <button className="btn-ghost px-2" onClick={() => setCurrentTime((v) => clamp(v - frameStep, 0, duration))} title={t('edit.stepBackTitle')}>◀ {t('edit.stepBack')}</button>
-                <button className="btn-ghost px-2" onClick={() => setCurrentTime((v) => clamp(v + frameStep, 0, duration))} title={t('edit.stepForwardTitle')}>{t('edit.stepForward')} ▶</button>
+                <button className="btn-ghost px-2" onClick={setTrimStartAtCurrent}>{t('edit.trim.setStart')}</button>
+                <button
+                  className="btn-ghost px-2"
+                  title={t('edit.stepBackTitle')}
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    stepHoldRef.current?.start(-1);
+                  }}
+                  onPointerUp={() => stepHoldRef.current?.stop()}
+                  onPointerLeave={() => stepHoldRef.current?.stop()}
+                  onPointerCancel={() => stepHoldRef.current?.stop()}
+                >
+                  ◀ {t('edit.stepBack')}
+                </button>
+                <button
+                  className="btn-ghost px-2"
+                  title={t('edit.stepForwardTitle')}
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    stepHoldRef.current?.start(1);
+                  }}
+                  onPointerUp={() => stepHoldRef.current?.stop()}
+                  onPointerLeave={() => stepHoldRef.current?.stop()}
+                  onPointerCancel={() => stepHoldRef.current?.stop()}
+                >
+                  {t('edit.stepForward')} ▶
+                </button>
+                <button className="btn-ghost px-2" onClick={setTrimEndAtCurrent}>{t('edit.trim.setEnd')}</button>
               </div>
             </div>
 
@@ -395,7 +467,6 @@ export default function EditPage() {
             <button className={subMenu === 'trim' ? 'btn-primary w-full' : 'btn-ghost w-full'} onClick={() => setSubMenu('trim')}>{t('edit.trim')}</button>
             <button className={subMenu === 'rotate' ? 'btn-primary w-full' : 'btn-ghost w-full'} onClick={() => setSubMenu('rotate')}>{t('edit.rotate')}</button>
             <button className={subMenu === 'transcode' ? 'btn-primary w-full' : 'btn-ghost w-full'} onClick={() => setSubMenu('transcode')}>{t('edit.transcode')}</button>
-            <button className={subMenu === 'audio' ? 'btn-primary w-full' : 'btn-ghost w-full'} onClick={() => setSubMenu('audio')}>{t('edit.audio')}</button>
           </div>
         </div>
 
@@ -403,29 +474,47 @@ export default function EditPage() {
           <div className="card space-y-3">
             <h3 className="text-sm font-semibold text-strong">{t('edit.trim.title')}</h3>
             <div className="space-y-3">
-              <div>
-                <label className="label">{t('edit.trim.start')}</label>
-                <input type="range" min={0} max={Math.max(duration, 0)} step={frameStep} value={trimStart} onChange={(e) => setTrimStart(Number(e.target.value))} className="w-full accent-brand-500" />
-                <div className="text-xs text-faint">{trimStart.toFixed(2)}s</div>
+              <div className="flex items-center justify-between text-xs text-faint">
+                <span>{t('edit.trim.start')}: {trimStart.toFixed(2)}s</span>
+                <span>{t('edit.trim.end')}: {trimEnd.toFixed(2)}s</span>
               </div>
-              <div>
-                <label className="label">{t('edit.trim.end')}</label>
-                <input type="range" min={0} max={Math.max(duration, 0)} step={frameStep} value={trimEnd} onChange={(e) => setTrimEnd(Number(e.target.value))} className="w-full accent-brand-500" />
-                <div className="text-xs text-faint">{trimEnd.toFixed(2)}s</div>
+
+              <div
+                ref={trimBarRef}
+                className="relative h-10 cursor-pointer rounded-lg border border-surface-600 bg-surface-800 px-2"
+                onPointerDown={(e) => {
+                  const rect = trimBarRef.current?.getBoundingClientRect();
+                  if (!rect) return;
+                  const x = (e.clientX - rect.left) / Math.max(rect.width, 1);
+                  const pointerSec = x * duration;
+                  const startRatio = trimStart / Math.max(duration, 1);
+                  const endRatio = trimEnd / Math.max(duration, 1);
+                  if (Math.abs(pointerSec - trimStart) < 0.12) beginTrimDrag('start', e.clientX);
+                  else if (Math.abs(pointerSec - trimEnd) < 0.12) beginTrimDrag('end', e.clientX);
+                  else beginTrimDrag('move', e.clientX);
+                }}
+              >
+                <div className="absolute inset-y-3 left-2 right-2 rounded bg-surface-700" />
+                <div
+                  className="absolute inset-y-3 rounded bg-amber-400/75"
+                  style={{
+                    left: `${(trimStart / Math.max(duration, 1)) * 100}%`,
+                    width: `${Math.max(((trimEnd - trimStart) / Math.max(duration, 1)) * 100, 0)}%`
+                  }}
+                />
+                <div
+                  className="absolute top-1 bottom-1 w-1.5 cursor-ew-resize rounded-full bg-brand-500"
+                  style={{ left: `${(trimStart / Math.max(duration, 1)) * 100}%` }}
+                  onPointerDown={(e) => { e.stopPropagation(); beginTrimDrag('start', e.clientX); }}
+                />
+                <div
+                  className="absolute top-1 bottom-1 w-1.5 cursor-ew-resize rounded-full bg-brand-500"
+                  style={{ left: `${(trimEnd / Math.max(duration, 1)) * 100}%` }}
+                  onPointerDown={(e) => { e.stopPropagation(); beginTrimDrag('end', e.clientX); }}
+                />
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
-              <button className="btn-ghost" onClick={() => setTrimStart(currentTime)}>{t('edit.trim.setStart')}</button>
-              <button className="btn-ghost" onClick={() => setTrimEnd(currentTime)}>{t('edit.trim.setEnd')}</button>
-            </div>
-
-            <button className="btn-primary w-full" onClick={addCutSegment}>{t('edit.trim.markMiddle')}</button>
-            <button className="btn-ghost w-full" onClick={keepMiddleSegment}>{t('edit.trim.keepMiddle')}</button>
-            <div className="grid grid-cols-2 gap-2">
-              <button className="btn-ghost" onClick={removeLatestCutSegment} disabled={!cutSegments.length}>{t('edit.trim.undo')}</button>
-              <button className="btn-ghost" onClick={clearAllCutSegments} disabled={!cutSegments.length}>{t('edit.trim.clear')}</button>
-            </div>
           </div>
         )}
 
@@ -459,34 +548,19 @@ export default function EditPage() {
           </div>
         )}
 
-        {subMenu === 'audio' && (
-          <div className="card space-y-3">
-            <h3 className="text-sm font-semibold text-strong">{t('edit.audio')}</h3>
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={bgAudioEnabled} onChange={(e) => setBgAudioEnabled(e.target.checked)} />
-              {t('edit.audio.add')}
-            </label>
-            <input className="input" value={bgAudioInput} onChange={(e) => setBgAudioInput(e.target.value)} placeholder={t('edit.audio.placeholder')} />
-            <button className="btn-ghost" onClick={async () => {
-              const picked = await window.api.selectFiles();
-              if (picked?.[0]) setBgAudioInput(picked[0]);
-            }}>{t('edit.audio.select')}</button>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="label">{t('edit.audio.volumeOriginal')}</label>
-                <input className="input" type="range" min={0} max={1} step={0.05} value={originalVolume} onChange={(e) => setOriginalVolume(Number(e.target.value))} />
-                <div className="text-xs text-faint">{originalVolume.toFixed(2)}</div>
-              </div>
-              <div>
-                <label className="label">{t('edit.audio.volumeBackground')}</label>
-                <input className="input" type="range" min={0} max={1} step={0.05} value={backgroundVolume} onChange={(e) => setBackgroundVolume(Number(e.target.value))} />
-                <div className="text-xs text-faint">{backgroundVolume.toFixed(2)}</div>
-              </div>
+        <OutputFolderPicker value={outputDir} onChange={changeOutputDir} required />
+
+        {editProgressVisible && (
+          <div className="card space-y-2 p-3">
+            <div className="flex items-center justify-between text-xs text-faint">
+              <span>{t('edit.progress.running')}</span>
+              <span>{editProgress.toFixed(0)}%</span>
+            </div>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-surface-600">
+              <div className="h-full rounded-full bg-brand-500 transition-[width] duration-200" style={{ width: `${editProgress}%` }} />
             </div>
           </div>
         )}
-
-        <OutputFolderPicker value={outputDir} onChange={changeOutputDir} required />
 
         <button className="btn-primary w-full" disabled={!outputDir || !selected || busy} onClick={() => void onStart()}>
           ▶ {t('edit.start')}

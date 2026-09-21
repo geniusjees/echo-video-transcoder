@@ -1,6 +1,13 @@
+import { app, dialog } from 'electron';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { getConfig } from '../config/configStore';
+import {
+  formatConcatCancelMessage,
+  formatConcatConflictPrompt,
+  resolveConcatDialogLocale
+} from '@shared/concatI18n';
 import type { ProgressPayload, SourceInfo, TaskPayload, TaskStatus } from '@shared/types';
 import {
   buildAlignedListFile,
@@ -169,14 +176,24 @@ export class TaskRunner {
     const res = await proc.promise;
     this.running.delete(payload.id);
 
-    if (this.cancelled.has(payload.id)) throw new Error('已取消');
-    if (res.code !== 0) throw new Error(res.error || `ffmpeg 退出码 ${res.code}`);
+    if (this.cancelled.has(payload.id)) {
+      const locale = resolveConcatDialogLocale(getConfig().language, app.getLocale?.() ?? undefined);
+      throw new Error(formatConcatCancelMessage(locale));
+    }
+    if (res.code !== 0) throw new Error(res.error || `ffmpeg exit code ${res.code}`);
   }
 
   /** 拼接：先（可选）转码对齐，再 concat（§10.6） */
   private async runConcat(payload: TaskPayload): Promise<void> {
     const { segments, plan } = payload.concat!;
     if (!segments.length) throw new Error('没有可拼接的片段');
+
+    const decision = await resolveConcatOutputPathWithPrompt(payload.output);
+    if (decision.action === 'cancel') {
+      const locale = resolveConcatDialogLocale(getConfig().language, app.getLocale?.() ?? undefined);
+      throw new Error(formatConcatCancelMessage(locale));
+    }
+    payload.output = decision.output;
 
     const workDir = path.join(os.tmpdir(), 'video-transcoder', `concat-${payload.id}`);
     fs.mkdirSync(workDir, { recursive: true });
@@ -213,8 +230,11 @@ export class TaskRunner {
       this.running.set(payload.id, { payload, proc });
       const res = await proc.promise;
       this.running.delete(payload.id);
-      if (this.cancelled.has(payload.id)) throw new Error('已取消');
-      if (res.code !== 0) throw new Error(res.error || `拼接失败：${label}`);
+      if (this.cancelled.has(payload.id)) {
+        const locale = resolveConcatDialogLocale(getConfig().language, app.getLocale?.() ?? undefined);
+        throw new Error(formatConcatCancelMessage(locale));
+      }
+      if (res.code !== 0) throw new Error(res.error || `Concat failed: ${label}`);
       doneSteps += 1;
     };
 
@@ -286,6 +306,57 @@ export class TaskRunner {
     if (id) this.cancelled.delete(id);
     else this.cancelled.clear();
   }
+}
+
+export type ConcatOutputAction = 'overwrite' | 'rename' | 'cancel';
+
+export { formatConcatConflictPrompt, resolveConcatDialogLocale };
+
+export function resolveConcatOutputPath(
+  output: string,
+  nextIndexFactory: (n: number) => number = (n) => n
+): { action: ConcatOutputAction; output: string } {
+  if (!output || !fs.existsSync(output)) {
+    return { action: 'overwrite', output };
+  }
+
+  const dir = path.dirname(output);
+  const ext = path.extname(output);
+  const base = path.basename(output, ext);
+  for (let i = 1; ; i++) {
+    const candidate = path.join(dir, `${base} (${nextIndexFactory(i)})${ext}`);
+    if (!fs.existsSync(candidate)) {
+      return { action: 'rename', output: candidate };
+    }
+  }
+}
+
+async function resolveConcatOutputPathWithPrompt(
+  output: string
+): Promise<{ action: ConcatOutputAction; output: string }> {
+  if (!output || !fs.existsSync(output)) {
+    return { action: 'overwrite', output };
+  }
+
+  const locale = resolveConcatDialogLocale(getConfig().language, app.getLocale?.() ?? undefined);
+  const prompt = formatConcatConflictPrompt(locale, path.basename(output));
+  const res = await dialog.showMessageBox({
+    type: 'warning',
+    title: prompt.title,
+    message: prompt.message,
+    buttons: prompt.buttons,
+    defaultId: 0,
+    cancelId: prompt.buttons.length - 1,
+    noLink: true
+  });
+
+  if (res.response === 0) {
+    return { action: 'overwrite', output };
+  }
+  if (res.response === 1) {
+    return resolveConcatOutputPath(output);
+  }
+  return { action: 'cancel', output };
 }
 
 async function safeProbe(input: string): Promise<SourceInfo> {
