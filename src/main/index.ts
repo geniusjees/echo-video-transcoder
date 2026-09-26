@@ -3,9 +3,16 @@ import path from 'node:path';
 import { initConfig } from './config/configStore';
 import { detectCached } from './hardware/detector';
 import { registerAllIpc } from './ipc';
-import { configPath, ffmpegPath, ffprobePath } from './utils/paths';
+import { binStatus, binaryArchWarning, configPath } from './utils/paths';
 
 const isDev = !app.isPackaged;
+
+/** 缺失 ffmpeg 时建议的安装命令（按平台） */
+function installCommand(): string {
+  if (process.platform === 'darwin') return 'brew install ffmpeg';
+  if (process.platform === 'win32') return 'winget install Gyan.FFmpeg';
+  return 'sudo apt install ffmpeg';
+}
 
 /** 应用图标：打包后取 resources/icon.png，开发时取项目 build/icon.png */
 const appIconPath = app.isPackaged
@@ -64,18 +71,37 @@ async function bootstrap(): Promise<void> {
 
   mainWindow.webContents.once('did-finish-load', () => {
     if (warning) mainWindow?.webContents.send('log', `[配置] ${warning}`);
-    // 环境自检日志：便于排查探针 / 拖拽问题
-    mainWindow?.webContents.send('log', `[环境] ffmpeg: ${ffmpegPath()}`);
-    mainWindow?.webContents.send('log', `[环境] ffprobe: ${ffprobePath()}`);
+
+    // 环境自检：ffmpeg / ffprobe 解析状态
+    const status = binStatus();
+    mainWindow?.webContents.send('log', `[环境] ffmpeg: ${status.paths.ffmpeg}`);
+    mainWindow?.webContents.send('log', `[环境] ffprobe: ${status.paths.ffprobe}`);
     mainWindow?.webContents.send('log', `[环境] config: ${configPath()}`);
+
+    // 缺失必需二进制（ffmpeg / ffprobe）—— 否则核心功能不可用
+    if (status.missing.length) {
+      mainWindow?.webContents.send(
+        'log',
+          `[环境] ⚠ 未找到必需组件：${status.missing.join(' / ')}。请执行：${installCommand()}`
+      );
+    }
+
+    const archWarn = binaryArchWarning(status.paths.ffmpeg);
+    if (archWarn) mainWindow?.webContents.send('log', `[硬件] ⚠ ${archWarn}`);
+
     mainWindow?.webContents.send('app:env', {
       isDev,
       platform: process.platform,
       // 系统语言：渲染进程用它匹配 i18n 语言（C4 语言自动匹配）
       locale: app.getLocale(),
       configPath: configPath(),
-      ffmpeg: ffmpegPath(),
-      ffprobe: ffprobePath()
+      ffmpeg: status.paths.ffmpeg,
+      ffprobe: status.paths.ffprobe,
+      /** 缺失的二进制（渲染进程据此弹出提示框） */
+      missingBins: status.missing,
+      missingRequiredBins: status.missingRequired,
+      /** 建议的安装命令（供一键复制） */
+      installCommand: installCommand()
     });
   });
 

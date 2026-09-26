@@ -35,6 +35,9 @@ function getPathForFile(file: File): string {
 const api = {
   // ---- 环境 ----
   getPathForFile,
+  /** 写入系统剪贴板（渲染进程 file:// 下 navigator.clipboard 不可靠） */
+  clipboardWrite: (text: string): Promise<boolean> =>
+    ipcRenderer.invoke(IPC.CLIPBOARD_WRITE, text),
 
   // ---- 配置 ----
   configGet: (): Promise<{ config: AppConfig; storageMode: 'root' | 'userData' }> =>
@@ -63,21 +66,6 @@ const api = {
     rotation?: { mode: 0 | 90 | 180 | 270; flip: 'none' | 'horizontal' | 'vertical' }
   ): Promise<string> =>
     ipcRenderer.invoke(IPC.THUMBNAIL, { input, seekSec, rotation }),
-  previewPlay: (
-    arg: {
-      input: string;
-      seekSec?: number;
-      rotation?: { mode: 0 | 90 | 180 | 270; flip: 'none' | 'horizontal' | 'vertical' };
-    }
-  ): Promise<boolean> => ipcRenderer.invoke(IPC.PREVIEW_PLAY, arg),
-  previewSeek: (
-    arg: {
-      input: string;
-      seekSec?: number;
-      rotation?: { mode: 0 | 90 | 180 | 270; flip: 'none' | 'horizontal' | 'vertical' };
-    }
-  ): Promise<boolean> => ipcRenderer.invoke(IPC.PREVIEW_SEEK, arg),
-  previewStop: (): Promise<boolean> => ipcRenderer.invoke(IPC.PREVIEW_STOP),
 
   // ---- 队列（C9）----
   queueAdd: (arg: {
@@ -143,6 +131,8 @@ const api = {
   ): Promise<{ files: string[]; folders: number; truncated: boolean; expandedFromFolders: number }> =>
     ipcRenderer.invoke(IPC.FILES_EXPAND, paths),
   openPath: (target: string): Promise<void> => ipcRenderer.invoke(IPC.OPEN_PATH, target),
+  /** 在系统默认浏览器打开外部链接（仅 http/https） */
+  openExternal: (url: string): Promise<void> => ipcRenderer.invoke(IPC.OPEN_EXTERNAL, url),
 
   // ---- 事件订阅（M→R）----
   onProgress: (cb: (p: ProgressPayload) => void) => {

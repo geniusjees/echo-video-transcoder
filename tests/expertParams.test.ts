@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { decideExpert, resolveExpertParams } from '../src/shared/params';
-import type { ExpertOptions, SourceInfo } from '../src/shared/types';
+import { decideExpert, pickEncoderName, resolveExpertParams } from '../src/shared/params';
+import type { ExpertOptions, HWCapability, SourceInfo } from '../src/shared/types';
 
 function source(overrides: Partial<SourceInfo> = {}): SourceInfo {
   return {
@@ -75,5 +75,25 @@ describe('expert custom resolution upscale toggle', () => {
   it('expands to the custom target when upscale is on', () => {
     const params = resolveExpertParams(source(), options({ resolution: 2160, allowUpscale: true }));
     expect(params.resolution).toBe(2160);
+  });
+
+  it('prefers Apple MPS VideoToolbox instead of falling back to software on arm64 Macs', () => {
+    const cap: HWCapability = {
+      nvenc: false,
+      qsv: false,
+      amf: false,
+      videotoolbox: true,
+      vaapi: false,
+      mps: true,
+      recommended: 'videotoolbox-mps',
+      platform: 'darwin',
+      arch: 'arm64',
+      encoders: ['hevc_videotoolbox']
+    };
+
+    const chosen = pickEncoderName(cap, 'hevc', 'auto');
+    expect(chosen.hw).toBe('videotoolbox-mps');
+    expect(chosen.encoder).toBe('hevc_videotoolbox');
+    expect(chosen.fellBack).toBe(false);
   });
 });

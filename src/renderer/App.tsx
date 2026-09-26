@@ -4,11 +4,13 @@ import HardwareBadge from './components/HardwareBadge';
 import ImportProgress from './components/ImportProgress';
 import LanguageSwitch from './components/LanguageSwitch';
 import LogModal from './components/LogModal';
+import MissingBinsModal from './components/MissingBinsModal';
 import ThemeSwitch from './components/ThemeSwitch';
 import ConcatPage from './pages/ConcatPage';
 import EditPage from './pages/EditPage';
 import ExtractAudioPage from './pages/ExtractAudioPage';
 import RotatePage from './pages/RotatePage';
+import SponsorPage from './pages/SponsorPage';
 import TranscodePage from './pages/TranscodePage';
 import { useT, useI18nStore } from './i18n';
 import { useConfigStore } from './stores/configStore';
@@ -18,9 +20,10 @@ import { useImportStore } from './stores/importStore';
 import { shouldPromptClearQueue, useQueueStore } from './stores/queueStore';
 import { useParamStore } from './stores/paramStore';
 import { initTheme, type ThemeMode } from './stores/themeStore';
+import { useUiStore } from './stores/uiStore';
 import { dragHasFiles, resolveDroppedPaths } from './utils/files';
 
-const TABS = ['transcode', 'edit', 'rotate', 'audio', 'concat'] as const;
+const TABS = ['transcode', 'edit', 'rotate', 'audio', 'concat', 'sponsor'] as const;
 type TabKey = (typeof TABS)[number];
 
 export default function App() {
@@ -42,27 +45,48 @@ export default function App() {
 
   const initFromConfig = useParamStore((s) => s.initFromConfig);
   const setConcatOutputDir = useConcatStore((s) => s.setOutputDir);
+  const notifyMissingBins = useUiStore((s) => s.notifyMissingBins);
 
   const dragging = useDropStore((s) => s.dragging);
   const setDragging = useDropStore((s) => s.setDragging);
 
   useEffect(() => {
     void (async () => {
-      await loadConfig();
-      await detect();
+      // 配置与硬件侦测相互独立：任一失败都不应阻断另一项，且失败要可见
+      try {
+        await loadConfig();
+      } catch (e) {
+        useQueueStore.getState().onLog(`[配置] 加载失败：${e instanceof Error ? e.message : String(e)}`);
+      }
+      try {
+        await detect();
+      } catch (e) {
+        useQueueStore
+          .getState()
+          .onLog(`[硬件] 侦测失败：${e instanceof Error ? e.message : String(e)}（可点击右上角徽标重试）`);
+      }
     })();
   }, [loadConfig, detect]);
 
-  // 系统语言（主进程 app.getLocale()）
+  // 系统语言（主进程 app.getLocale()）+ 启动自检
   useEffect(() => {
     const off = window.api.onAppEnv((env) => {
-      const locale = (env as { locale?: string } | null)?.locale;
-      if (locale) setSystemLocale(locale);
+      const payload = env as {
+        locale?: string;
+        platform?: string;
+        missingRequiredBins?: string[];
+        installCommand?: string;
+      } | null;
+      if (payload?.locale) setSystemLocale(payload.locale);
+      // macOS 启动自检：缺失 ffmpeg / ffprobe 时弹出提示框（含一键复制安装命令）
+      if (payload?.platform === 'darwin' && payload.missingRequiredBins?.length) {
+        notifyMissingBins(payload.missingRequiredBins, payload.installCommand ?? '');
+      }
     });
     return () => {
       off();
     };
-  }, []);
+  }, [notifyMissingBins]);
 
   // 语言初始化：系统语言匹配 + 用户配置（'auto' = 跟随系统）
   useEffect(() => {
@@ -186,6 +210,7 @@ export default function App() {
       )}
 
       <LogModal />
+      <MissingBinsModal />
       <ImportProgress />
 
       {/* 顶部栏 */}
@@ -198,7 +223,6 @@ export default function App() {
             className="h-6 w-6 rounded object-contain"
           />
           <span className="text-sm font-semibold tracking-wide text-strong">{t('app.name')}</span>
-          <span className="chip bg-surface-700 text-muted">v0.1</span>
         </div>
 
         <div className="flex items-center gap-3">
@@ -237,6 +261,7 @@ export default function App() {
         {tab === 'rotate' && <RotatePage />}
         {tab === 'audio' && <ExtractAudioPage />}
         {tab === 'concat' && <ConcatPage />}
+        {tab === 'sponsor' && <SponsorPage />}
       </main>
     </div>
   );

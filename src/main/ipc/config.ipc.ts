@@ -116,4 +116,11 @@ export function registerConfigIpc(): void {
       shell.openPath(path.resolve(target));
     }
   });
+
+  // 外部链接（仅允许 http/https，防协议注入）
+  ipcMain.handle(IPC.OPEN_EXTERNAL, (_e, url: string) => {
+    if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
+      void shell.openExternal(url);
+    }
+  });
 }

@@ -134,13 +134,12 @@ export const IPC = {
   SELECT_FOLDER: 'select:folder',
   FILES_EXPAND: 'files:expand',
   OPEN_PATH: 'open:path',
+  OPEN_EXTERNAL: 'open:external',
   THUMBNAIL: 'media:thumbnail',
-  PREVIEW_PLAY: 'media:previewPlay',
-  PREVIEW_SEEK: 'media:previewSeek',
-  PREVIEW_STOP: 'media:previewStop',
   BUILD_COMMAND: 'command:build',
   POWER_SET: 'power:set',
   THEME_SET: 'theme:set',
+  CLIPBOARD_WRITE: 'clipboard:write',
   /** 事件（M→R） */
   EVT_PROGRESS: 'progress',
   EVT_LOG: 'log',
@@ -209,7 +208,7 @@ export const DEFAULT_CONFIG: AppConfig = {
 
   hardware: {
     autoDetect: true,
-    allow: ['nvenc', 'qsv', 'videotoolbox', 'mps' as HWKind, 'amf', 'vaapi'],
+    allow: ['nvenc', 'qsv', 'videotoolbox', 'videotoolbox-mps', 'amf', 'vaapi'],
     force: null
   },
 

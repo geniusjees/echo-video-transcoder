@@ -1,7 +1,7 @@
-import { execFile, spawn } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import type { SourceInfo } from '@shared/types';
-import { ffmpegPath, ffplayPath, ffprobePath } from '../utils/paths';
+import { ffmpegPath, ffprobePath } from '../utils/paths';
 
 interface ProbeStream {
   codec_name?: string;
@@ -151,71 +151,6 @@ export function buildThumbnailArgs(
     'mjpeg',
     'pipe:1'
   ];
-}
-
-export function buildFfplayArgs(
-  input: string,
-  seekSec = 0,
-  rotation?: { mode: 0 | 90 | 180 | 270; flip: 'none' | 'horizontal' | 'vertical' },
-  title = 'preview'
-): string[] {
-  const filters: string[] = [];
-  if (rotation?.mode === 90) filters.push('transpose=1');
-  else if (rotation?.mode === 180) filters.push('transpose=2,transpose=2');
-  else if (rotation?.mode === 270) filters.push('transpose=2');
-  if (rotation?.flip === 'horizontal') filters.push('hflip');
-  if (rotation?.flip === 'vertical') filters.push('vflip');
-
-  const args = ['-hide_banner', '-loglevel', 'warning', '-autoexit', '-ss', String(seekSec), '-i', input];
-  if (filters.length) args.push('-vf', filters.join(','));
-  args.push('-window_title', title);
-  return args;
-}
-
-let ffplayProcess: ReturnType<typeof spawn> | null = null;
-
-export function openPreview(
-  input: string,
-  seekSec = 0,
-  rotation?: { mode: 0 | 90 | 180 | 270; flip: 'none' | 'horizontal' | 'vertical' }
-): void {
-  previewStop();
-  const bin = ffplayPath();
-  ffplayProcess = spawn(bin, buildFfplayArgs(input, seekSec, rotation, 'video-preview'), {
-    stdio: 'ignore',
-    windowsHide: true,
-    detached: false
-  });
-}
-
-export function previewSeek(
-  input: string,
-  seekSec = 0,
-  rotation?: { mode: 0 | 90 | 180 | 270; flip: 'none' | 'horizontal' | 'vertical' }
-): void {
-  if (!ffplayProcess || ffplayProcess.killed) {
-    openPreview(input, seekSec, rotation);
-    return;
-  }
-  previewStop();
-  openPreview(input, seekSec, rotation);
-}
-
-export function previewStop(): void {
-  if (!ffplayProcess || ffplayProcess.killed) {
-    ffplayProcess = null;
-    return;
-  }
-  try {
-    if (process.platform === 'win32') {
-      spawn('taskkill', ['/pid', String(ffplayProcess.pid), '/f', '/t'], { windowsHide: true });
-    } else {
-      ffplayProcess.kill('SIGTERM');
-    }
-  } catch {
-    // ignore
-  }
-  ffplayProcess = null;
 }
 
 /** 生成缩略图（dataURL），用于片段预览（§13.4） */

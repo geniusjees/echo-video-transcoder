@@ -137,11 +137,15 @@ export function pickEncoderName(
       ? ([cap.recommended, 'nvenc', 'qsv', 'videotoolbox', 'amf', 'vaapi'] as HWKind[])
       : [preferred];
 
-  for (const hw of order) {
-    if (hw === 'software') continue;
-    if (!cap[hw as keyof HWCapability]) continue;
-    const encoder = HW_ENCODERS[hw]?.[codec];
-    if (encoder) return { encoder, hw, fellBack: false };
+  for (const rawHw of order) {
+    if (rawHw === 'software') continue;
+
+    const hw = rawHw === 'videotoolbox-mps' ? 'videotoolbox' : rawHw;
+    const isAvailable = hw === 'videotoolbox' ? cap.videotoolbox && (!rawHw || rawHw !== 'videotoolbox-mps' || cap.mps) : Boolean(cap[hw as keyof HWCapability]);
+    if (!isAvailable) continue;
+
+    const encoder = HW_ENCODERS[rawHw]?.[codec] ?? HW_ENCODERS[hw]?.[codec];
+    if (encoder) return { encoder, hw: rawHw, fellBack: false };
   }
   return { encoder: SW_FALLBACK[codec], hw: 'software', fellBack: true };
 }

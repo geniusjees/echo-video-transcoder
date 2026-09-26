@@ -4,7 +4,13 @@ import path from 'node:path';
 import { DEFAULT_CONFIG } from '@shared/constants';
 import type { AppConfig, ExpertOptions, Preset } from '@shared/types';
 import { setPreventSleepEnabled } from '../system/powerSave';
-import { configPath, fallbackConfigPath, isWritable, appRoot } from '../utils/paths';
+import {
+  configPath,
+  fallbackConfigPath,
+  isWritable,
+  appRoot,
+  setConfiguredBins
+} from '../utils/paths';
 
 /**
  * 单一配置文件读写（C1/C2）
@@ -111,6 +117,8 @@ function applySideEffects(): void {
     /* ignore */
   }
   setPreventSleepEnabled(current.advanced?.preventSleep ?? true);
+  // 让 ffmpeg/ffprobe 路径解析（含硬件侦测）能读到用户配置的绝对路径
+  setConfiguredBins(current.paths ?? {});
 }
 
 export function getConfig(): AppConfig {

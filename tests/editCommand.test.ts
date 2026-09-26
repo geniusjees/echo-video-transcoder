@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildArgsForTask } from '../src/main/transcoder/commandBuilder';
-import { buildFfplayArgs, buildThumbnailArgs } from '../src/main/media/probe';
+import { buildThumbnailArgs } from '../src/main/media/probe';
 import type { TaskPayload } from '@shared/types';
 
 describe('编辑任务命令构建', () => {
@@ -48,16 +48,5 @@ describe('编辑任务命令构建', () => {
     const joined = args.join(' ');
     expect(joined).toContain('transpose=1');
     expect(joined).toContain('hflip');
-  });
-
-  it('应生成 ffplay 预览参数并带上定位和旋转过滤', () => {
-    const args = buildFfplayArgs('in.mp4', 3.5, { mode: 90, flip: 'horizontal' }, '预览');
-    const joined = args.join(' ');
-    expect(joined).toContain('-ss');
-    expect(joined).toContain('3.5');
-    expect(joined).toContain('transpose=1');
-    expect(joined).toContain('hflip');
-    expect(joined).toContain('预览');
-    expect(joined).not.toContain('-nodisp');
   });
 });
