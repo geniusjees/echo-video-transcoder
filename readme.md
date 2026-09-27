@@ -4,13 +4,6 @@
 
 [简体中文](readme_cn.md) · English
 
-## ⬇️ Download
-
-| Platform | Download |
-|---|---|
-| 🍎 **macOS** (Apple Silicon) | [Echo Video Transcoder-0.1.0-arm64.dmg](https://github.com/geniusjees/echo-video-transcoder/releases/latest/download/Echo%20Video%20Transcoder-0.1.0-arm64.dmg) |
-| 🪟 **Windows** | [Echo Video Transcoder-0.1.0.zip](https://github.com/geniusjees/echo-video-transcoder/releases/latest/download/Echo%20Video%20Transcoder-0.1.0.zip) — *not available yet* |
-
 ---
 
 ## ✨ Features
@@ -39,7 +32,11 @@
 ### Requirements
 
 - Node.js 18+
-- FFmpeg / FFprobe binaries available under `ffmpeg/bin` (or install them system-wide)
+- FFmpeg / FFprobe binaries available under `ffmpeg/bin` (or install them system-wide if you're on Windows)
+
+> **FFmpeg / FFprobe**
+> - **macOS:** install via Homebrew — `brew install ffmpeg`.
+> - **Windows (building from source):** make sure the `ffmpeg/bin` folder contains **`ffprobe.exe`** and **`ffmpeg.exe`**.
 
 ### Install & run
 
