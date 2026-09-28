@@ -59,7 +59,6 @@
     ],
     "win": {
       "target": ["nsis", "portable"],
-      "electronLanguages": ["de", "en", "en_GB", "es", "fr", "it", "ja", "ko", "pt_BR", "pt_PT", "zh_CN", "zh_TW"],
       "extraResources": [
         {
           "from": "ffmpeg/bin",
@@ -70,8 +69,7 @@
     },
     "mac": {
       "target": ["dmg"],
-      "category": "public.app-category.video",
-      "electronLanguages": ["de", "en", "en_GB", "es", "fr", "it", "ja", "ko", "pt_BR", "pt_PT", "zh_CN", "zh_TW"]
+      "category": "public.app-category.video"
     }
   }
 }

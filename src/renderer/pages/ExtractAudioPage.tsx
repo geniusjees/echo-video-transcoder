@@ -88,6 +88,15 @@ export default function ExtractAudioPage() {
           onRemove={remove}
           onAdd={pickFiles}
           onAddFolder={pickFolder}
+          kind="audio"
+          audio={{
+            codec,
+            bitrateKbps,
+            sampleRate,
+            channels,
+            startSec: useRange ? startSec : undefined,
+            endSec: useRange ? endSec : undefined
+          }}
         />
       </div>
 

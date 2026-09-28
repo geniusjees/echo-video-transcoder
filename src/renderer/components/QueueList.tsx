@@ -7,7 +7,7 @@ import {
   formatSize,
   resolutionLabel
 } from '../utils/format';
-import { estimateForItem } from '../utils/estimate';
+import { estimateAudioSize, estimateForItem, type AudioEstimateOptions } from '../utils/estimate';
 import { useDropStore } from '../stores/dropStore';
 import { useT } from '../i18n';
 import ProgressBar, { StatusChip } from './ProgressBar';
@@ -34,6 +34,14 @@ interface Props {
    * capped: 固定上限高度，超出内部滚动（旋转/提取音频页）
    */
   variant?: 'fill' | 'capped';
+  /**
+   * 队列内容类型：
+   * video = 转码 / 旋转 / 编辑等（显示生效参数 + 视频体积预估）
+   * audio = 音频提取（隐藏转码参数，改为预估导出音频体积）
+   */
+  kind?: 'video' | 'audio';
+  /** kind=audio 时用于估算导出音频体积的参数 */
+  audio?: AudioEstimateOptions;
 }
 
 /** capped 模式下的高度上限：恰好容纳 8 个条目（84px + 8px 间距） */
@@ -51,14 +59,30 @@ export default function QueueList({
   titleKey,
   mode = 'simple',
   expertResolved,
-  variant = 'capped'
+  variant = 'capped',
+  kind = 'video',
+  audio
 }: Props) {
   const t = useT();
   const dragging = useDropStore((s) => s.dragging);
   const isFill = variant === 'fill';
+  const isAudio = kind === 'audio';
 
   const paramsFor = (item: QueueItem): ResolvedParams | null =>
     mode === 'expert' ? (expertResolved?.[item.id] ?? item.resolved) : item.resolved;
+
+  /** 音频页的来源信息：音轨编码 / 采样率 / 声道 / 时长 / 大小（不含任何视频参数） */
+  const audioSourceParts = (item: QueueItem): string[] => {
+    const s = item.source;
+    const parts: string[] = [];
+    if (s.audioCodec) parts.push(String(s.audioCodec).toUpperCase());
+    if (s.sampleRate) parts.push(`${Math.round(s.sampleRate / 1000)}kHz`);
+    if (s.channels) parts.push(s.channels === 1 ? t('audio.mono') : t('audio.stereo'));
+    parts.push(formatDuration(s.durationSec));
+    parts.push(formatSize(s.fileSizeBytes));
+    parts.push(s.hasAudio ? '🔊' : '🔇');
+    return parts;
+  };
 
   const header = (
     <div className="flex shrink-0 items-center justify-between">
@@ -108,9 +132,13 @@ export default function QueueList({
       {items.map((item) => {
         const p = progress[item.id];
         const failed = item.status === 'error';
-        const params = paramsFor(item);
-        const noop = mode !== 'expert' && item.decision?.action === 'no-op';
-        const est = estimateForItem(item, params);
+        const params = isAudio ? null : paramsFor(item);
+        const noop = !isAudio && mode !== 'expert' && item.decision?.action === 'no-op';
+        const est = isAudio
+          ? audio
+            ? estimateAudioSize(item.source, audio)
+            : null
+          : estimateForItem(item, params);
 
         return (
           <div
@@ -125,16 +153,23 @@ export default function QueueList({
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span className="truncate text-sm font-medium text-strong">
-                    🎬 {baseName(item.input)}
+                    {isAudio ? '🎵' : '🎬'} {baseName(item.input)}
                   </span>
                   <StatusChip status={item.status} />
                 </div>
                 <div className="mt-0.5 text-xs text-faint">
-                  {item.source.width}×{item.source.height}（
-                  {resolutionLabel(item.source.width, item.source.height)}） · {item.source.fps}fps ·{' '}
-                  {formatBitrate(item.source.bitrateMbps)} · {codecLabel(item.source.codec)} ·{' '}
-                  {formatDuration(item.source.durationSec)} ·{' '}
-                  {formatSize(item.source.fileSizeBytes)} · {item.source.hasAudio ? '🔊' : '🔇'}
+                  {isAudio ? (
+                    audioSourceParts(item).join(' · ')
+                  ) : (
+                    <>
+                      {item.source.width}×{item.source.height}（
+                      {resolutionLabel(item.source.width, item.source.height)}） · {item.source.fps}
+                      fps · {formatBitrate(item.source.bitrateMbps)} ·{' '}
+                      {codecLabel(item.source.codec)} · {formatDuration(item.source.durationSec)} ·{' '}
+                      {formatSize(item.source.fileSizeBytes)} ·{' '}
+                      {item.source.hasAudio ? '🔊' : '🔇'}
+                    </>
+                  )}
                 </div>
                 {failed ? (
                   <p className="mt-1 text-xs text-err">{item.error}</p>

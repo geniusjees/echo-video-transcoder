@@ -4,6 +4,7 @@ import HardwareBadge from './components/HardwareBadge';
 import ImportProgress from './components/ImportProgress';
 import LanguageSwitch from './components/LanguageSwitch';
 import LogModal from './components/LogModal';
+import MessageDialog from './components/MessageDialog';
 import MissingBinsModal from './components/MissingBinsModal';
 import ThemeSwitch from './components/ThemeSwitch';
 import ConcatPage from './pages/ConcatPage';
@@ -12,8 +13,9 @@ import ExtractAudioPage from './pages/ExtractAudioPage';
 import RotatePage from './pages/RotatePage';
 import SponsorPage from './pages/SponsorPage';
 import TranscodePage from './pages/TranscodePage';
-import { useT, useI18nStore } from './i18n';
+import { t as translate, useT, useI18nStore } from './i18n';
 import { useConfigStore } from './stores/configStore';
+import { showConfirm } from './stores/dialogStore';
 import { useConcatStore } from './stores/concatStore';
 import { useDropStore } from './stores/dropStore';
 import { useImportStore } from './stores/importStore';
@@ -112,10 +114,17 @@ export default function App() {
 
       const items = useQueueStore.getState().items;
       if (shouldPromptClearQueue(items)) {
-        const confirmed = window.confirm(t('queue.clearCompletedConfirm'));
-        if (confirmed) {
-          useQueueStore.getState().clear();
-        }
+        // 注意：这里必须用模块级 t（调用时读取当前语言）。
+        // 事件订阅 effect 只在挂载时执行一次，若用 useT() 的返回值会被闭包
+        // 捕获成首帧语言（i18n store 初值为 zh-CN），导致界面切到日语仍弹中文。
+        void showConfirm(
+          translate('queue.clearCompletedConfirm'),
+          translate('queue.clear')
+        ).then((confirmed) => {
+          if (confirmed) {
+            useQueueStore.getState().clear();
+          }
+        });
       }
 
       if (p.id.startsWith('concat-') && (p.status === 'done' || p.status === 'error')) {
@@ -211,6 +220,7 @@ export default function App() {
 
       <LogModal />
       <MissingBinsModal />
+      <MessageDialog />
       <ImportProgress />
 
       {/* 顶部栏 */}

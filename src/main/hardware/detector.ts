@@ -1,6 +1,5 @@
 import { execFile } from 'node:child_process';
 import os from 'node:os';
-import fs from 'node:fs';
 import { pickEncoderName } from '@shared/params';
 import type { HWCapability, HWKind } from '@shared/types';
 import { ffmpegPath } from '../utils/paths';
@@ -14,10 +13,16 @@ function run(cmd: string, args: string[]): Promise<string> {
   });
 }
 
-/** 返回 `ffmpeg -encoders` 的原始输出 */
+/**
+ * 返回 `ffmpeg -encoders` 的原始输出
+ *
+ * 注意：ffmpegPath() 在未随包分发时会回退为裸命令名（依赖系统 PATH，Windows 常见），
+ * 此路径 fs.existsSync 必然为 false，若据此提前返回会把「系统已安装 ffmpeg」
+ * 误判成「无 ffmpeg」，导致硬件侦测恒为软件编码。因此这里直接执行、由失败兜底。
+ */
 async function getEncoders(): Promise<string> {
   const bin = ffmpegPath();
-  if (!bin || !fs.existsSync(bin)) return '';
+  if (!bin) return '';
   return run(bin, ['-hide_banner', '-encoders']);
 }
 

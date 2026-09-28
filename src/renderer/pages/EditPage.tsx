@@ -3,6 +3,7 @@ import type { EditCutSegment, FlipMode, RotateMode, TaskPayload } from '@shared/
 import OutputFolderPicker from '../components/OutputFolderPicker';
 import { useConfigStore } from '../stores/configStore';
 import { useQueueStore } from '../stores/queueStore';
+import { showAlert } from '../stores/dialogStore';
 import { useDropHandler } from '../hooks/useDropHandler';
 import { useT } from '../i18n';
 import { createHoldController } from '../utils/editHold';
@@ -171,7 +172,7 @@ export default function EditPage() {
     if (queueItem.status === 'done' && editDoneNotifiedRef.current !== queueItem.id) {
       editDoneNotifiedRef.current = queueItem.id;
       setNotice(t('edit.completed'));
-      window.alert(t('edit.completed'));
+      void showAlert(t('edit.completed'));
     }
     if (queueItem.status === 'pending' || queueItem.status === 'running') {
       editDoneNotifiedRef.current = null;

@@ -5,7 +5,7 @@
   "paths": {
     "ffmpeg": "",
     "ffprobe": "",
-    "outputDir": "/Users/kennychen/Downloads"
+    "outputDir": "d:\\Users\\Jees\\Documents"
   },
   "transcode": {
     "parallelJobs": 1,

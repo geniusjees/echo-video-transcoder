@@ -174,7 +174,7 @@ export default function ExpertMode({ selected, hardware, options, onChange, reso
                 type="number"
                 min={0}
                 max={51}
-                value={options.crf ?? 23}
+                value={options.crf ?? 28}
                 onChange={(e) => onChange({ crf: Number(e.target.value) })}
               />
             </div>

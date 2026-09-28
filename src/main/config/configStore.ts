@@ -1,4 +1,4 @@
-import { BrowserWindow, nativeTheme } from 'electron';
+import { app, BrowserWindow, nativeTheme } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DEFAULT_CONFIG } from '@shared/constants';
@@ -64,6 +64,35 @@ function chooseWriteTarget(): { file: string; mode: 'root' | 'userData'; reason?
   };
 }
 
+/**
+ * 本平台默认输出文件夹 = 系统「文档」目录
+ * （macOS: ~/Documents；Windows: %USERPROFILE%\Documents）
+ */
+function platformDefaultOutputDir(): string {
+  try {
+    return app.getPath('documents');
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * 解析可用的输出文件夹（§6.2）：
+ * - 已配置且在本机存在 → 原样保留（用户本地设置优先）
+ * - 未配置，或路径在本机不存在（如从 macOS 迁移过来的绝对路径）→ 回退平台「文档」
+ */
+function resolveOutputDir(configured?: string): string {
+  const dir = (configured ?? '').trim();
+  if (dir) {
+    try {
+      if (fs.statSync(dir).isDirectory()) return dir;
+    } catch {
+      /* 不存在 / 无权限 → 使用平台默认 */
+    }
+  }
+  return platformDefaultOutputDir();
+}
+
 export function initConfig(): { config: AppConfig; warning?: string } {
   const rootFile = configPath();
   const userFile = fallbackConfigPath();
@@ -72,6 +101,13 @@ export function initConfig(): { config: AppConfig; warning?: string } {
   const fromUser = readJsonSafe(userFile);
   const fromRoot = readJsonSafe(rootFile);
   current = fromUser ?? fromRoot ?? structuredClone(DEFAULT_CONFIG);
+
+  // 输出文件夹默认值：跨平台首次运行时用本平台「文档」目录兜底
+  const resolvedOutputDir = resolveOutputDir(current.paths?.outputDir);
+  const outputDirChanged = resolvedOutputDir !== (current.paths?.outputDir ?? '');
+  if (outputDirChanged) {
+    current = { ...current, paths: { ...current.paths, outputDir: resolvedOutputDir } };
+  }
 
   // 首次启动：根目录生成 config.json（附录 A）
   let warning: string | undefined;
@@ -101,6 +137,18 @@ export function initConfig(): { config: AppConfig; warning?: string } {
       } catch {
         /* ignore */
       }
+    }
+  }
+
+  // 已有配置文件但输出文件夹被改写为平台默认值 → 立即落盘，下次启动直接复用
+  if (outputDirChanged && (fromRoot || fromUser)) {
+    const target = chooseWriteTarget();
+    try {
+      fs.mkdirSync(path.dirname(target.file), { recursive: true });
+      fs.writeFileSync(target.file, JSON.stringify(current, null, 2), 'utf-8');
+      storageMode = target.mode;
+    } catch (e) {
+      console.error('[config] 输出文件夹默认值写入失败：', e);
     }
   }
 

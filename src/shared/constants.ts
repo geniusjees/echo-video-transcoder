@@ -193,7 +193,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     allowIncreaseFps: false,
     fpsMode: 'source',
     bitrateMode: 'crf',
-    crf: 23,
+    crf: 28,
     audioCodec: 'aac',
     audioBitrateKbps: 192,
     sampleRate: 48000,

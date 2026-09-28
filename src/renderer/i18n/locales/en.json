@@ -54,6 +54,7 @@
   "op.title": "Actions",
   "op.start": "Start transcode",
   "op.cancel": "Cancel",
+  "dialog.ok": "OK",
   "op.log": "Log",
   "op.needOutputDir": "Please choose an output folder first",
   "op.nothing": "Nothing in the queue needs transcoding",

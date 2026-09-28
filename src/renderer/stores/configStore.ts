@@ -63,7 +63,7 @@ export function expertOptionsFromConfig(config: AppConfig | null): ExpertOptions
     allowIncreaseFps: d?.allowIncreaseFps ?? false,
     fpsMode: d?.fpsMode ?? 'source',
     bitrateMode: d?.bitrateMode ?? 'crf',
-    crf: d?.crf ?? 23,
+    crf: d?.crf ?? 28,
     audioCodec: d?.audioCodec ?? 'aac',
     audioBitrateKbps: d?.audioBitrateKbps ?? 192,
     sampleRate: d?.sampleRate ?? 48000,
