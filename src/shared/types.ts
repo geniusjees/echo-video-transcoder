@@ -147,6 +147,18 @@ export interface HWCapability {
   recommended: HWKind;
   platform: NodeJS.Platform;
   arch: string;
+  /**
+   * 本机 ffmpeg 二进制自身的 CPU 架构（Windows/Linux 无意义 → 'unknown'）。
+   * macOS 上用于判定 VideoToolbox 能否使用 `-q:v` 恒定质量：仓库自带的
+   * x86_64 版 ffmpeg 在 Apple Silicon 上经 Rosetta 运行，`-q:v` 会直接报错。
+   */
+  ffmpegArch?: 'arm64' | 'x86_64' | 'unknown';
+  /**
+   * VideoToolbox 是否支持 `-q:v` 恒定质量。
+   * 仅当 macOS + arm64（Apple Silicon 原生）版 ffmpeg 时为 true；
+   * x86_64 版会报 `-q:v qscale not available`，需退回码率模式。
+   */
+  vtConstantQuality?: boolean;
   encoders: string[];
 }
 

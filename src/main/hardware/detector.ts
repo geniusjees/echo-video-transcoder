@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import os from 'node:os';
 import { pickEncoderName } from '@shared/params';
 import type { HWCapability, HWKind } from '@shared/types';
-import { ffmpegPath } from '../utils/paths';
+import { ffmpegPath, machoCpuType } from '../utils/paths';
 
 /** 执行一段命令并返回 stdout（失败返回空串） */
 function run(cmd: string, args: string[]): Promise<string> {
@@ -57,6 +57,17 @@ export async function detect(): Promise<HWCapability> {
     }
     // Apple Silicon (arm64) + VideoToolbox → 认定具备 MPS 加速（§9.1）
     cap.mps = (machine === 'arm64' || arch === 'arm64') && cap.videotoolbox;
+
+    // 本机 ffmpeg 二进制的真实架构：决定 VideoToolbox 能否使用 `-q:v` 恒定质量。
+    // 该选项只在 arm64 构建中启用（FFmpeg vtenc_qscale_enabled()），x86_64 构建
+    // （Intel Mac / Rosetta 下运行）会直接报错 → 需退回码率模式。
+    const hostArch: 'arm64' | 'x86_64' =
+      machine === 'arm64' || arch === 'arm64' ? 'arm64' : 'x86_64';
+    cap.ffmpegArch = machoCpuType(ffmpegPath()) ?? hostArch;
+    cap.vtConstantQuality = cap.ffmpegArch === 'arm64';
+  } else {
+    cap.ffmpegArch = 'unknown';
+    cap.vtConstantQuality = false;
   }
 
   cap.recommended = pickRecommended(cap);

@@ -1,6 +1,13 @@
 import { AUDIO_ENCODERS, SW_FALLBACK } from '@shared/constants';
 import type { HWCapability, HWKind, ResolvedParams, SourceInfo, TaskPayload } from '@shared/types';
 import { pickEncoder } from '../hardware/detector';
+import {
+  buildQualityArgs,
+  crfEquivalentBitrateMbps,
+  encoderKind,
+  isSoftwareEncoder,
+  type QualityEnv
+} from './encoderProfile';
 
 /**
  * FFmpeg 命令构建（§10）
@@ -24,92 +31,56 @@ export function resolveVideoEncoder(params: ResolvedParams, ctx: CommandContext)
   return SW_FALLBACK[params.codec];
 }
 
-function isSoftwareEncoder(encoder: string): boolean {
-  return /^lib(x264|x265|vpx|vpx-vp9|svtav1|aom-av1)/.test(encoder);
-}
-
-/** 编码器厂商分类（由硬件侦测选出的 encoder 名决定，§9.3） */
-type EncoderKind = 'software' | 'nvenc' | 'qsv' | 'amf' | 'vaapi' | 'videotoolbox' | 'unknown';
-
-function encoderKind(encoder: string): EncoderKind {
-  if (isSoftwareEncoder(encoder)) return 'software';
-  if (encoder.endsWith('_nvenc')) return 'nvenc';
-  if (encoder.endsWith('_qsv')) return 'qsv';
-  if (encoder.endsWith('_amf')) return 'amf';
-  if (encoder.endsWith('_vaapi')) return 'vaapi';
-  if (encoder.endsWith('_videotoolbox')) return 'videotoolbox';
-  return 'unknown';
-}
-
-function clampInt(n: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, Math.round(n)));
-}
-
-/** VideoToolbox `-q:v`（0–100，越大越好）与 CRF 的近似换算 */
-function crfToVtQuality(crf: number): number {
-  return clampInt(100 - crf * 1.6, 1, 100);
-}
-
-/** 旋转/翻转重编码时的默认质量（仅软件/硬件各自映射） */
+/** 旋转/翻转重编码时的默认质量（各编码器按显卡/系统各自映射） */
 const ROTATE_CRF = 20;
 
+/** 旋转/翻转任务拿不到源信息时的占位（用于估算等效码率） */
+const ROTATE_FALLBACK_SOURCE: SourceInfo = {
+  width: 1920,
+  height: 1080,
+  fps: 30,
+  durationSec: 0,
+  codec: 'hevc',
+  hasAudio: false
+};
+
+/** 由硬件能力推导运行时画质环境（缺省 = 非 macOS，VideoToolbox 无恒定质量） */
+function qualityEnv(ctx: CommandContext): QualityEnv {
+  const cap = ctx.capability;
+  return {
+    platform: cap?.platform ?? process.platform,
+    vtConstantQuality: Boolean(cap?.vtConstantQuality)
+  };
+}
+
 /**
- * 按编码器类型把「画质意图」翻译为对应的质量 / 码率参数。
- * - CRF 模式（普通模式 + 专家模式 crf）：翻译为各硬件编码器的等效恒定质量参数；
- *   `-crf` 只是 libx264/libx265 的私有选项，硬件编码器一律不认，必须换各自参数。
- * - 码率模式（专家模式 cbr/vbr）：生成各硬件编码器对应的码率参数。
+ * 按「显卡 + 系统」把画质意图翻译为质量 / 码率参数（实现见 encoderProfile，§9.3）。
+ * - CRF 模式：各硬件编码器翻译为等效恒定质量参数；VideoToolbox 在不支持 `-q:v`
+ *   的系统（x86_64 版 ffmpeg）上退回等效码率，避免任务失败；
+ * - 码率模式：生成各硬件编码器对应的码率参数。
  */
-function encodeQualityArgs(encoder: string, params: ResolvedParams): string[] {
+function encodeQualityArgs(
+  encoder: string,
+  params: ResolvedParams,
+  source: SourceInfo,
+  env: QualityEnv
+): string[] {
   const kind = encoderKind(encoder);
   const crf = typeof params.crf === 'number' && params.crf > 0 ? params.crf : undefined;
-
-  if (crf !== undefined) {
-    switch (kind) {
-      case 'software':
-        return ['-crf', String(crf), '-preset', 'medium'];
-      case 'nvenc':
-        // NVENC：VBR + CQ（0–51，量级≈CRF），-b:v 0 表示纯恒定质量
-        return ['-rc', 'vbr', '-cq', String(clampInt(crf, 0, 51)), '-b:v', '0'];
-      case 'qsv':
-        // QSV：ICQ 全局质量（1–51）
-        return ['-global_quality', String(clampInt(crf, 1, 51))];
-      case 'amf':
-        return [
-          '-rc',
-          'cqp',
-          '-qp_i',
-          String(clampInt(crf, 0, 51)),
-          '-qp_p',
-          String(clampInt(crf, 0, 51))
-        ];
-      case 'vaapi':
-        return ['-rc_mode', 'CQP', '-qp', String(clampInt(crf, 0, 51))];
-      case 'videotoolbox':
-        return ['-q:v', String(crfToVtQuality(crf))];
-      default:
-        // 未知编码器：尽力而为（多数 ffmpeg 会忽略不认识的 -crf）
-        return ['-crf', String(crf)];
-    }
-  }
-
-  const mbps = params.bitrateMbps;
-  if (mbps > 0) {
-    const b = Math.round(mbps * 10) / 10;
-    const bufsize = Math.round(b * 2 * 10) / 10;
-    const rate = ['-b:v', `${b}M`, '-maxrate', `${b}M`, '-bufsize', `${bufsize}M`];
-    switch (kind) {
-      case 'nvenc':
-        return ['-rc', 'vbr', ...rate];
-      case 'amf':
-        return ['-rc', 'vbr_peak', ...rate];
-      case 'vaapi':
-        return ['-rc_mode', 'VBR', ...rate];
-      default:
-        return rate;
-    }
-  }
-
-  return [];
+  // CRF 模式下的等效码率：供不支持恒定质量的硬件（x86_64 VideoToolbox）兜底
+  const bitrateMbps =
+    params.bitrateMbps > 0
+      ? params.bitrateMbps
+      : crf !== undefined
+        ? crfEquivalentBitrateMbps({
+            codec: params.codec,
+            width: source.width,
+            height: source.height,
+            crf,
+            sourceBitrateMbps: source.bitrateMbps
+          })
+        : 0;
+  return buildQualityArgs(kind, { crf, bitrateMbps }, env);
 }
 
 function audioArgs(params: ResolvedParams, withAudioBitrate = true): string[] {
@@ -217,7 +188,7 @@ export function buildTranscodeArgs(
     if (params.fps > 0 && source.fps > 0 && params.fps < source.fps) {
       args.push('-r', String(params.fps));
     }
-    args.push(...encodeQualityArgs(encoder, params));
+    args.push(...encodeQualityArgs(encoder, params, source, qualityEnv(ctx)));
     if (isSoftwareEncoder(encoder)) args.push('-pix_fmt', 'yuv420p');
   }
 
@@ -236,7 +207,8 @@ export function buildRotateArgs(
   input: string,
   output: string,
   opts: { mode: 0 | 90 | 180 | 270; flip: 'none' | 'horizontal' | 'vertical'; metadataOnly: boolean },
-  ctx: CommandContext = {}
+  ctx: CommandContext = {},
+  source: SourceInfo = ROTATE_FALLBACK_SOURCE
 ): string[] {
   const metadataArgs: string[] = [
     '-hide_banner',
@@ -265,7 +237,9 @@ export function buildRotateArgs(
   if (opts.flip === 'horizontal') filters.push('hflip');
   if (opts.flip === 'vertical') filters.push('vflip');
 
-  const encoder = resolveVideoEncoder({ codec: 'hevc', bitrateMbps: 0 } as ResolvedParams, ctx);
+  const rotateParams = { codec: 'hevc', crf: ROTATE_CRF, bitrateMbps: 0 } as ResolvedParams;
+  const encoder = resolveVideoEncoder(rotateParams, ctx);
+  const env = qualityEnv(ctx);
 
   return [
     '-hide_banner',
@@ -284,7 +258,7 @@ export function buildRotateArgs(
     ...(filters.length ? ['-vf', filters.join(',')] : []),
     '-c:v',
     encoder,
-    ...encodeQualityArgs(encoder, { crf: ROTATE_CRF, bitrateMbps: 0 } as ResolvedParams),
+    ...encodeQualityArgs(encoder, rotateParams, source, env),
     ...(isSoftwareEncoder(encoder) ? ['-pix_fmt', 'yuv420p'] : []),
     '-c:a',
     'copy',
@@ -388,7 +362,7 @@ export function buildArgsForTask(
         payload.trim
       );
     case 'rotate':
-      return buildRotateArgs(payload.input, payload.output, payload.rotate!, ctx);
+      return buildRotateArgs(payload.input, payload.output, payload.rotate!, ctx, source);
     case 'extractAudio':
       return buildAudioExtractArgs(payload.input, payload.output, payload.audio!);
     case 'edit':
