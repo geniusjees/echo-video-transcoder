@@ -11,12 +11,69 @@ export const TARGET = {
   resolution: 1080,
   fps: 30,
   bitrateMbps: 6,
-  crf: 28,
+  crf: 26,
   codec: 'hevc' as VideoCodec
 };
 
 /** 1080p 参考像素，用于码率自动计算（§7.2） */
 export const REF_PIXELS = 1920 * 1080;
+
+/** 各目标编码的等效质量 CRF（H.265 CRF 26 为基准；与分辨率无关） */
+export const TARGET_CRF: Record<VideoCodec, number> = {
+  h264: 21,
+  hevc: 26,
+  vp9: 30,
+  av1: 33,
+  copy: 0 // copy 不适用
+};
+
+/**
+ * 各目标编码的「不转码」码率阈值 / 自动码率基准（1080p30 视频流码率，Mbps）。
+ * 运行时按源像素比缩放（4K = ×4）。
+ */
+export const NOOP_RATE_BASE: Record<VideoCodec, number> = {
+  h264: 6.0,
+  hevc: 4.0,
+  vp9: 4.0,
+  av1: 2.8,
+  copy: Infinity // copy 不重新编码
+};
+
+/** 归一化后的源编码类别 */
+export type CodecKind = VideoCodec | 'legacy' | 'unknown';
+
+/**
+ * 源 codec_name → 归一化编码类别。
+ * 'legacy' = 表外旧格式（Xvid/MPEG-4/MPEG-2/VC-1…），'unknown' = 探测不到。
+ */
+export function normalizeCodec(name?: string): CodecKind {
+  switch ((name ?? '').trim().toLowerCase()) {
+    case 'h264':
+    case 'avc1':
+    case 'avc':
+      return 'h264';
+    case 'hevc':
+    case 'h265':
+    case 'hvc1':
+    case 'hev1':
+      return 'hevc';
+    case 'vp9':
+      return 'vp9';
+    case 'av1':
+    case 'av01':
+      return 'av1';
+    case '':
+      return 'unknown';
+    default:
+      return 'legacy';
+  }
+}
+
+/** 是否为旧格式（legacy / 探测不到）→ 需要兜底转码为现代编码 */
+export function isLegacyCodec(name?: string): boolean {
+  const kind = normalizeCodec(name);
+  return kind === 'legacy' || kind === 'unknown';
+}
 
 /** v4.1 音频统一规则（A 方案） */
 export const AUDIO_UNIFY = {
@@ -162,7 +219,8 @@ export const DEFAULT_CONFIG: AppConfig = {
   paths: {
     ffmpeg: '',
     ffprobe: '',
-    outputDir: ''
+    outputDir: '',
+    concatOutputDir: ''
   },
 
   transcode: {
@@ -178,9 +236,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     container: 'mp4',
     target: {
       resolution: 1080,
-      fps: 30,
-      bitrateMbps: 6,
-      crf: 28
+      fps: 30
     },
     scaleResolution: false,
     autoBitrateBaseMbps: 6
@@ -193,7 +249,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     allowIncreaseFps: false,
     fpsMode: 'source',
     bitrateMode: 'crf',
-    crf: 28,
+    crf: 26,
     audioCodec: 'aac',
     audioBitrateKbps: 192,
     sampleRate: 48000,

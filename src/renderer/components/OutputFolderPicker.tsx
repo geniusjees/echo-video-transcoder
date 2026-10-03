@@ -30,11 +30,13 @@ export default function OutputFolderPicker({ value, onChange, required }: Props)
         {t('out.label')} {required && <span className="text-err">*</span>}
       </label>
       <div className="flex gap-2">
+        {/* 只读：输出目录必须通过「浏览」选择，避免手输路径与实际生效目录不一致 */}
         <input
-          className="input flex-1"
+          className="input flex-1 cursor-default"
           placeholder={required ? t('out.placeholder') : t('out.placeholderOptional')}
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          readOnly
+          title={t('out.readonlyHint')}
         />
         <button className="btn-ghost shrink-0" onClick={browse}>
           {t('out.browse')}

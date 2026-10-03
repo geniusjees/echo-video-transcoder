@@ -45,7 +45,7 @@ export interface Target {
   resolution: number;
   fps: number;
   bitrateMbps: number;
-  /** 普通模式默认压制质量：CRF 28 */
+  /** 普通模式默认压制质量：CRF 26 */
   crf?: number;
   codec: VideoCodec;
 }
@@ -274,7 +274,10 @@ export interface ProgressPayload {
 export interface PathsConfig {
   ffmpeg: string;
   ffprobe: string;
+  /** 转码 / 旋转 / 编辑 / 提取音频页的输出目录 */
   outputDir: string;
+  /** 拼接页独立的输出目录（不与转码共用） */
+  concatOutputDir: string;
 }
 
 export interface TranscodeConfig {
@@ -291,7 +294,9 @@ export interface SimpleModeConfig {
   target: {
     resolution: number;
     fps: number;
-    bitrateMbps: number;
+    /** 可选：手动覆盖「不转码」码率阈值（Mbps）；留空则按目标编码自动查表 */
+    bitrateMbps?: number;
+    /** 可选：手动覆盖编码 CRF；留空则按目标编码自动查表 */
     crf?: number;
   };
   scaleResolution: boolean;

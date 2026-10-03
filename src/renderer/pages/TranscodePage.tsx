@@ -319,7 +319,7 @@ export default function TranscodePage() {
             selected={selected}
             scaleResolution={scaleResolution}
             onScaleChange={setScaleResolution}
-            target={config?.simpleMode.target ?? { resolution: 1080, fps: 30, bitrateMbps: 6, crf: 28 }}
+            target={config?.simpleMode.target ?? { resolution: 1080, fps: 30, crf: 26 }}
           />
         ) : (
           <ExpertMode

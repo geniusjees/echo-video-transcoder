@@ -45,6 +45,16 @@ const EMPTY_SOURCE: SourceInfo = {
   hasAudio: false
 };
 
+/** 确保输出文件所在目录存在：目录被删除时 ffmpeg 不会自建，会直接报错 */
+function ensureOutputDir(output: string): void {
+  if (!output) return;
+  try {
+    fs.mkdirSync(path.dirname(output), { recursive: true });
+  } catch {
+    /* 创建失败则交给 ffmpeg 报错 */
+  }
+}
+
 /**
  * 任务调度：转码 / 压缩 / 旋转 / 提取音频 / 拼接 / 下载
  * 支持并发上限（config.transcode.parallelJobs，默认 1）、取消、暂停。
@@ -155,6 +165,7 @@ export class TaskRunner {
     const bin = ffmpegPath();
     this.events.onCommand?.(payload.id, toCommandString(bin, args));
 
+    ensureOutputDir(payload.output);
     const proc = runProcess(bin, args, {
       durationSec: duration,
       onProgress: (p) =>
@@ -194,6 +205,7 @@ export class TaskRunner {
       throw new Error(formatConcatCancelMessage(locale));
     }
     payload.output = decision.output;
+    ensureOutputDir(payload.output);
 
     const workDir = path.join(os.tmpdir(), 'video-transcoder', `concat-${payload.id}`);
     fs.mkdirSync(workDir, { recursive: true });

@@ -1,5 +1,18 @@
-import { TARGET } from '@shared/constants';
-import type { HWCapability, HWKind, ResolvedParams, SimpleDecision, SourceInfo } from '@shared/types';
+import {
+  NOOP_RATE_BASE,
+  REF_PIXELS,
+  TARGET,
+  TARGET_CRF,
+  isLegacyCodec
+} from '@shared/constants';
+import type {
+  HWCapability,
+  HWKind,
+  ResolvedParams,
+  SimpleDecision,
+  SourceInfo,
+  VideoCodec
+} from '@shared/types';
 import { computeAutoBitrate } from './autoBitrate';
 import { capBitrate, capFps, capResolution, round1 } from './capRule';
 import { pickEncoder } from '../hardware/detector';
@@ -7,6 +20,12 @@ import { pickEncoder } from '../hardware/detector';
 /**
  * 普通（简单）模式决策树 —— §7 综合判断 B
  * 只在主进程执行（§4.2），渲染进程仅展示结果（C7）。
+ *
+ * 不转码阈值 / 编码 CRF 均按「目标编码」查表：
+ * - 阈值取 `NOOP_RATE_BASE[目标编码]`（1080p30 基准），再按源像素比缩放；
+ * - CRF 取 `TARGET_CRF[目标编码]`；
+ * - 现代编码之间不强制互转（避免多次转码损失画质）；
+ *   源为旧格式（legacy/探测不到）时兜底转码为现代编码。
  */
 
 export interface DecideCtx {
@@ -22,18 +41,21 @@ export interface DecideCtx {
   /** 硬件能力（用于决定实际编码器） */
   capability?: HWCapability;
   preferredHW?: 'auto' | HWKind;
-  /** 目标档位（默认 TARGET，可由 config.simpleMode.target 覆盖） */
-  target?: { resolution: number; fps: number; bitrateMbps: number; crf?: number };
+  /**
+   * 目标档位（默认 TARGET，可由 config.simpleMode.target 覆盖）。
+   * `bitrateMbps` / `crf` 为可选手动覆盖；留空则按目标编码自动查表。
+   */
+  target?: { resolution: number; fps: number; bitrateMbps?: number; crf?: number };
 }
 
-function baseParams(ctx: DecideCtx): ResolvedParams {
+function baseParams(ctx: DecideCtx, codec: VideoCodec, crf: number): ResolvedParams {
   const target = ctx.target ?? TARGET;
   return {
     resolution: target.resolution,
     fps: target.fps,
     bitrateMbps: 0,
-    crf: target.crf ?? 28,
-    codec: ctx.codec ?? (TARGET.codec as ResolvedParams['codec']),
+    crf,
+    codec,
     container: ctx.container ?? 'mp4',
     audioCodec: ctx.audioCodec ?? 'aac',
     audioBitrateKbps: ctx.audioBitrateKbps ?? 192,
@@ -54,35 +76,44 @@ function withEncoder(params: ResolvedParams, ctx: DecideCtx): ResolvedParams {
 export function decideSimple(source: SourceInfo, ctx: DecideCtx): SimpleDecision {
   const br = source.bitrateMbps ?? Infinity; // 未知码率 → 保守转码
   const t = ctx.target ?? TARGET;
+  const targetCodec = (ctx.codec ?? TARGET.codec) as VideoCodec;
 
-  // 2) 综合判断：分辨率 / 码率 / 帧率 / 编码 任一超标
+  // 不转码阈值 / 自动码率基准：按目标编码查表（1080p 基准），再按源像素比缩放（4K = ×4）
+  // 注：仅当 ctx.target 显式提供时才覆盖，TARGET 只作最终兜底。
+  const baseRaw = ctx.target?.bitrateMbps ?? NOOP_RATE_BASE[targetCodec] ?? TARGET.bitrateMbps;
+  const baseMbps = Number.isFinite(baseRaw) ? baseRaw : TARGET.bitrateMbps;
+  const ratio = ((source.width || 1920) * (source.height || 1080)) / REF_PIXELS;
+  const threshold = Number.isFinite(baseRaw) ? round1(baseRaw * ratio) : Infinity;
+  // 编码 CRF：按目标编码查表（可选手动覆盖）
+  const crf = ctx.target?.crf ?? TARGET_CRF[targetCodec] ?? TARGET.crf;
+
+  // 2) 综合判断：分辨率 / 码率 / 帧率 任一超标；旧格式（legacy）兜底转码
   const needByRes = source.height > t.resolution;
-  const needByRate = br > t.bitrateMbps;
+  const needByRate = br > threshold;
   const needByFps = source.fps > t.fps;
-  const needTranscode = needByRes || needByRate || needByFps;
+  const needByLegacy = isLegacyCodec(source.codec); // 仅旧格式兜底，现代编码之间不强制互转
+  const needTranscode = needByRes || needByRate || needByFps || needByLegacy;
 
   // 3) 无需转码
   if (!needTranscode) {
     return {
       action: 'no-op',
-      reason: '源已符合统一配置（分辨率/码率/帧率均不超标），无需转码',
+      reason: '源已符合统一配置（分辨率/码率/帧率均不超标，且为现代编码），无需转码',
       params: null
     };
   }
 
   const fpsCap = capFps(t.fps, source.fps);
   const resCap = capResolution(t.resolution, source.height);
-  const brCap = capBitrate(t.bitrateMbps, source.bitrateMbps);
+  const brCap = capBitrate(baseMbps, source.bitrateMbps);
 
   // 4) 情形 A：分辨率更低但码率更高 → 保留分辨率、压码率（B 综合判断）
   if (source.height < t.resolution && needByRate) {
     const params = withEncoder(
       {
-        ...baseParams(ctx),
+        ...baseParams(ctx, targetCodec, crf),
         resolution: source.height,
         fps: fpsCap.value,
-        bitrateMbps: 0,
-        crf: (ctx.target?.crf ?? TARGET.crf ?? 28),
         capped: brCap.capped || fpsCap.capped,
         caps: { resolution: false, bitrate: brCap.capped, fps: fpsCap.capped }
       },
@@ -90,7 +121,7 @@ export function decideSimple(source: SourceInfo, ctx: DecideCtx): SimpleDecision
     );
     return {
       action: 'transcode',
-      reason: `分辨率 ${source.height}p 低于目标但码率偏高，保留分辨率并按 CRF ${params.crf ?? 28} 质量压制`,
+      reason: `分辨率 ${source.height}p 低于目标但码率偏高，保留分辨率并按 CRF ${crf} 质量压制`,
       params
     };
   }
@@ -99,11 +130,9 @@ export function decideSimple(source: SourceInfo, ctx: DecideCtx): SimpleDecision
   if (source.height === t.resolution) {
     const params = withEncoder(
       {
-        ...baseParams(ctx),
+        ...baseParams(ctx, targetCodec, crf),
         resolution: resCap.value,
         fps: fpsCap.value,
-        bitrateMbps: 0,
-        crf: (ctx.target?.crf ?? TARGET.crf ?? 28),
         capped: brCap.capped || fpsCap.capped || resCap.capped,
         caps: {
           resolution: resCap.capped,
@@ -115,7 +144,7 @@ export function decideSimple(source: SourceInfo, ctx: DecideCtx): SimpleDecision
     );
     return {
       action: 'transcode',
-      reason: `按统一配置重编码：${params.resolution}p / ${params.fps}fps / CRF ${params.crf ?? 28}`,
+      reason: `按统一配置重编码：${params.resolution}p / ${params.fps}fps / CRF ${crf}`,
       params
     };
   }
@@ -125,11 +154,9 @@ export function decideSimple(source: SourceInfo, ctx: DecideCtx): SimpleDecision
     // 缩放到目标档位
     const params = withEncoder(
       {
-        ...baseParams(ctx),
+        ...baseParams(ctx, targetCodec, crf),
         resolution: resCap.value,
         fps: fpsCap.value,
-        bitrateMbps: 0,
-        crf: (ctx.target?.crf ?? TARGET.crf ?? 28),
         caps: {
           resolution: false,
           bitrate: brCap.capped,
@@ -141,26 +168,19 @@ export function decideSimple(source: SourceInfo, ctx: DecideCtx): SimpleDecision
     );
     return {
       action: 'transcode',
-      reason: `缩放至 ${params.resolution}p / ${params.fps}fps / CRF ${params.crf ?? 28}`,
+      reason: `缩放至 ${params.resolution}p / ${params.fps}fps / CRF ${crf}`,
       params
     };
   }
 
   // 保持分辨率 + 码率自动计算（§7.2）+ 封顶（C6）
-  const auto = computeAutoBitrate(
-    source.width,
-    source.height,
-    source.bitrateMbps,
-    t.bitrateMbps
-  );
+  const auto = computeAutoBitrate(source.width, source.height, source.bitrateMbps, baseMbps);
 
   const params = withEncoder(
     {
-      ...baseParams(ctx),
+      ...baseParams(ctx, targetCodec, crf),
       resolution: source.height,
       fps: fpsCap.value,
-      bitrateMbps: 0,
-      crf: ctx.target?.crf ?? TARGET.crf ?? 28,
       capped: auto.cappedBySource || fpsCap.capped,
       caps: { resolution: false, bitrate: auto.cappedBySource, fps: fpsCap.capped }
     },
@@ -169,7 +189,7 @@ export function decideSimple(source: SourceInfo, ctx: DecideCtx): SimpleDecision
 
   return {
     action: 'transcode',
-    reason: `保持 ${source.height}p / ${params.fps}fps，按 CRF ${params.crf ?? 28} 质量压制，不提升分辨率`,
+    reason: `保持 ${source.height}p / ${params.fps}fps，按 CRF ${crf} 质量压制，不提升分辨率`,
     params
   };
 }

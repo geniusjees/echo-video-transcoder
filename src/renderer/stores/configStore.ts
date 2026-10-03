@@ -10,6 +10,8 @@ interface ConfigState {
   save: (next: AppConfig) => Promise<void>;
   patch: (patch: Partial<AppConfig>) => Promise<void>;
   setOutputDir: (dir: string) => Promise<void>;
+  /** 拼接页独立输出目录（不与转码共用） */
+  setConcatOutputDir: (dir: string) => Promise<void>;
   detect: (force?: boolean) => Promise<HWCapability>;
   setNotice: (n: string | null) => void;
 }
@@ -43,6 +45,12 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
     await get().save({ ...current, paths: { ...current.paths, outputDir: dir } });
   },
 
+  setConcatOutputDir: async (dir) => {
+    const current = get().config;
+    if (!current) return;
+    await get().save({ ...current, paths: { ...current.paths, concatOutputDir: dir } });
+  },
+
   detect: async (force) => {
     const hardware = await window.api.hardwareDetect(force);
     set({ hardware });
@@ -63,7 +71,7 @@ export function expertOptionsFromConfig(config: AppConfig | null): ExpertOptions
     allowIncreaseFps: d?.allowIncreaseFps ?? false,
     fpsMode: d?.fpsMode ?? 'source',
     bitrateMode: d?.bitrateMode ?? 'crf',
-    crf: d?.crf ?? 28,
+    crf: d?.crf ?? 26,
     audioCodec: d?.audioCodec ?? 'aac',
     audioBitrateKbps: d?.audioBitrateKbps ?? 192,
     sampleRate: d?.sampleRate ?? 48000,

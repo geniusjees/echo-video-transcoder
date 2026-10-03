@@ -102,11 +102,21 @@ export function initConfig(): { config: AppConfig; warning?: string } {
   const fromRoot = readJsonSafe(rootFile);
   current = fromUser ?? fromRoot ?? structuredClone(DEFAULT_CONFIG);
 
-  // 输出文件夹默认值：跨平台首次运行时用本平台「文档」目录兜底
+  // 输出文件夹：为空、或路径在本机不存在时，用本平台「文档」目录兜底。
+  // 只在内存里生效、不落盘——该默认值完全由平台推导得出，写回配置文件只会把
+  // 「某台机器的绝对路径」带进仓库（开发态 appRoot 就是仓库根目录）；
+  // 用户主动选择目录时仍会走 saveConfig 正常持久化。
+  // 转码与拼接各自独立解析，互不影响。
   const resolvedOutputDir = resolveOutputDir(current.paths?.outputDir);
-  const outputDirChanged = resolvedOutputDir !== (current.paths?.outputDir ?? '');
-  if (outputDirChanged) {
-    current = { ...current, paths: { ...current.paths, outputDir: resolvedOutputDir } };
+  const resolvedConcatDir = resolveOutputDir(current.paths?.concatOutputDir);
+  if (
+    resolvedOutputDir !== (current.paths?.outputDir ?? '') ||
+    resolvedConcatDir !== (current.paths?.concatOutputDir ?? '')
+  ) {
+    current = {
+      ...current,
+      paths: { ...current.paths, outputDir: resolvedOutputDir, concatOutputDir: resolvedConcatDir }
+    };
   }
 
   // 首次启动：根目录生成 config.json（附录 A）
@@ -137,18 +147,6 @@ export function initConfig(): { config: AppConfig; warning?: string } {
       } catch {
         /* ignore */
       }
-    }
-  }
-
-  // 已有配置文件但输出文件夹被改写为平台默认值 → 立即落盘，下次启动直接复用
-  if (outputDirChanged && (fromRoot || fromUser)) {
-    const target = chooseWriteTarget();
-    try {
-      fs.mkdirSync(path.dirname(target.file), { recursive: true });
-      fs.writeFileSync(target.file, JSON.stringify(current, null, 2), 'utf-8');
-      storageMode = target.mode;
-    } catch (e) {
-      console.error('[config] 输出文件夹默认值写入失败：', e);
     }
   }
 

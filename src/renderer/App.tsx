@@ -7,6 +7,7 @@ import LogModal from './components/LogModal';
 import MessageDialog from './components/MessageDialog';
 import MissingBinsModal from './components/MissingBinsModal';
 import ThemeSwitch from './components/ThemeSwitch';
+import ConcatProgressDialog from './components/concat/ConcatProgressDialog';
 import ConcatPage from './pages/ConcatPage';
 import EditPage from './pages/EditPage';
 import ExtractAudioPage from './pages/ExtractAudioPage';
@@ -101,7 +102,8 @@ export default function App() {
     if (config) {
       initFromConfig(config, config.simpleMode.scaleResolution);
       initTheme((config.theme ?? 'system') as ThemeMode);
-      if (config.paths.outputDir) setConcatOutputDir(config.paths.outputDir);
+      // 拼接页使用自己的输出目录，不与转码共用
+      if (config.paths.concatOutputDir) setConcatOutputDir(config.paths.concatOutputDir);
     }
   }, [config, initFromConfig, setConcatOutputDir]);
 
@@ -127,9 +129,8 @@ export default function App() {
         });
       }
 
-      if (p.id.startsWith('concat-') && (p.status === 'done' || p.status === 'error')) {
-        useConcatStore.setState({ busy: false });
-      }
+      // 拼接任务：把状态同步给进度子窗体（同时复位 busy）
+      useConcatStore.getState().applyTaskStatus(p);
     });
     const offI = window.api.onImportProgress((p) => useImportStore.getState().apply(p));
     return () => {
@@ -221,6 +222,7 @@ export default function App() {
       <LogModal />
       <MissingBinsModal />
       <MessageDialog />
+      <ConcatProgressDialog />
       <ImportProgress />
 
       {/* 顶部栏 */}

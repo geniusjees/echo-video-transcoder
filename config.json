@@ -5,7 +5,8 @@
   "paths": {
     "ffmpeg": "",
     "ffprobe": "",
-    "outputDir": "d:\\Users\\Jees\\Documents"
+    "outputDir": "d:\\Users\\Jees\\Pictures\\2026\\Oct",
+    "concatOutputDir": "d:\\Users\\Jees\\Documents"
   },
   "transcode": {
     "parallelJobs": 1,
@@ -19,9 +20,7 @@
     "container": "mp4",
     "target": {
       "resolution": 1080,
-      "fps": 30,
-      "bitrateMbps": 6,
-      "crf": 28
+      "fps": 30
     },
     "scaleResolution": false,
     "autoBitrateBaseMbps": 6
@@ -33,7 +32,7 @@
     "allowIncreaseFps": false,
     "fpsMode": "source",
     "bitrateMode": "crf",
-    "crf": 28,
+    "crf": 26,
     "audioCodec": "aac",
     "audioBitrateKbps": 192,
     "sampleRate": 48000,

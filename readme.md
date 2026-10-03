@@ -25,6 +25,22 @@
 - **Single config file** — one editable `config.json` next to the app.
 - **10 languages** — zh-CN / zh-TW / ja / ko / en / fr / es / pt / de / it, with automatic system-language matching.
 
+### Simple mode quality profile
+
+Simple mode targets a single **1080p / 30fps** output and decides "no transcode needed" per codec. Both the no-transcode bitrate threshold and the encode CRF come from the **target codec**, scaled by resolution (**4K = ×4** the 1080p value):
+
+| Target codec | CRF | 1080p30 threshold | 4K30 threshold |
+|---|---|---|---|
+| H.264 | 21 | 6.0 Mbps | 24.0 Mbps |
+| H.265 | 26 | 4.0 Mbps | 16.0 Mbps |
+| VP9 | 30 | 4.0 Mbps | 16.0 Mbps |
+| AV1 | 33 | 2.8 Mbps | 11.2 Mbps |
+
+- A source is skipped (`no-op`) only when resolution / frame rate / bitrate are all within budget.
+- **Modern codecs (H.264 / H.265 / VP9 / AV1) are never re-encoded just because the format differs** — this avoids quality loss from repeated transcoding.
+- **Legacy formats** (Xvid / MPEG-4 Part 2, MPEG-2, VC-1, VP8 …) or sources whose codec cannot be detected are always re-encoded to the target modern codec.
+- `simpleMode.target.bitrateMbps` / `crf` remain available as optional manual overrides.
+
 ---
 
 ## 🚀 Getting Started (Development)
@@ -68,7 +84,7 @@ The app reads a single `config.json` from the app root directory (falling back t
   "language": "auto",      // "auto" follows the system language
   "theme": "system",       // "system" | "light" | "dark"
   "paths": { "outputDir": "" },
-  "simpleMode": { "target": { "resolution": 1080, "fps": 30, "bitrateMbps": 6, "crf": 28 } }
+  "simpleMode": { "target": { "resolution": 1080, "fps": 30 } }  // bitrateMbps / crf = optional manual overrides
 }
 ```
 

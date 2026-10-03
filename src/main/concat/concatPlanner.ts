@@ -26,7 +26,7 @@ export interface PlanOptions {
   preferredHW?: 'auto' | HWKind;
   codec?: ResolvedParams['codec'];
   container?: ResolvedParams['container'];
-  target?: { resolution: number; fps: number; bitrateMbps: number };
+  target?: { resolution: number; fps: number; bitrateMbps?: number; crf?: number };
   expert?: ResolvedParams;
 }
 
@@ -84,6 +84,7 @@ export function computeUniformParams(segments: Segment[], opts: PlanOptions): Re
   );
 
   const t = opts.target ?? TARGET;
+  const tBaseMbps = t.bitrateMbps ?? TARGET.bitrateMbps;
 
   // 分辨率：绝不放大任何片段（C6）→ 取所有片段中的最小高度
   const resCap = capResolution(
@@ -102,14 +103,14 @@ export function computeUniformParams(segments: Segment[], opts: PlanOptions): Re
     width,
     resCap.value,
     Number.isFinite(minBitrate) ? minBitrate : undefined,
-    t.bitrateMbps
+    tBaseMbps
   );
 
   const base: ResolvedParams = {
     resolution: resCap.value,
     fps: fpsCap.value,
     bitrateMbps: opts.scaleResolution
-      ? Math.min(t.bitrateMbps, Number.isFinite(minBitrate) ? minBitrate : t.bitrateMbps)
+      ? Math.min(tBaseMbps, Number.isFinite(minBitrate) ? minBitrate : tBaseMbps)
       : auto.bitrateMbps,
     codec: opts.codec ?? (TARGET.codec as ResolvedParams['codec']),
     container: opts.container ?? 'mp4',

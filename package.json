@@ -1,6 +1,6 @@
 {
   "name": "echo-video-transcoder",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "跨 Windows / macOS 的视频转码工具（Electron + React + TypeScript）",
   "main": "dist/main/index.js",
   "author": "Video Transcoder",
@@ -66,6 +66,11 @@
           "filter": ["**/*", "!.DS_Store"]
         }
       ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
     },
     "mac": {
       "target": ["dmg"],

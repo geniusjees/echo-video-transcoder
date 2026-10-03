@@ -16,7 +16,7 @@ import { baseName } from '../utils/format';
 export default function ConcatPage() {
   const t = useT();
   const config = useConfigStore((s) => s.config);
-  const setOutputDirCfg = useConfigStore((s) => s.setOutputDir);
+  const setConcatOutputDirCfg = useConfigStore((s) => s.setConcatOutputDir);
 
   const segments = useConcatStore((s) => s.segments);
   const plan = useConcatStore((s) => s.plan);
@@ -58,7 +58,8 @@ export default function ConcatPage() {
 
   const changeOutputDir = async (dir: string) => {
     setOutputDir(dir);
-    await setOutputDirCfg(dir);
+    // 只写拼接自己的目录，避免覆盖转码页的输出目录
+    await setConcatOutputDirCfg(dir);
   };
 
   const canStart = Boolean(outputDir) && Boolean(plan) && segments.length > 0 && !busy;

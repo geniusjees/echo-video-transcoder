@@ -8,7 +8,7 @@ interface Props {
   selected?: QueueItem | null;
   scaleResolution: boolean;
   onScaleChange: (v: boolean) => void;
-  target: { resolution: number; fps: number; bitrateMbps: number; crf?: number };
+  target: { resolution: number; fps: number; bitrateMbps?: number; crf?: number };
 }
 
 /** 普通（简单）模式面板（§13.2） */
@@ -19,8 +19,8 @@ export default function SimpleMode({
   target
 }: Props) {
   const t = useT();
-  const crf = target.crf ?? 28;
-  const vars = { r: target.resolution, b: target.bitrateMbps, c: crf };
+  const crf = target.crf ?? 26;
+  const vars = { r: target.resolution, b: target.bitrateMbps ?? 0, c: crf };
   const rateText = `CRF ${crf}`;
 
   const rules = (

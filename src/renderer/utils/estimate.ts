@@ -1,3 +1,4 @@
+import { NOOP_RATE_BASE, REF_PIXELS, TARGET, TARGET_CRF } from '@shared/constants';
 import type { AudioCodec, QueueItem, ResolvedParams, SourceInfo } from '@shared/types';
 import { t } from '../i18n';
 import { formatDuration } from './format';
@@ -22,18 +23,33 @@ const CONTAINER_OVERHEAD: Record<string, number> = {
   webm: 1.02
 };
 
-/** CRF 模式拿不到码率，按源码率的经验系数推算 */
-function crfFactor(crf?: number): number {
-  const c = crf ?? 23;
-  if (c <= 18) return 0.95;
-  if (c <= 21) return 0.8;
-  if (c <= 24) return 0.65;
-  if (c <= 27) return 0.5;
-  if (c <= 30) return 0.4;
-  return 0.3;
+/** 输出像素数（由目标高度 + 源宽高比推出，宽取偶数） */
+function outputPixels(params: ResolvedParams, source: SourceInfo): number {
+  const h = params.resolution > 0 ? params.resolution : source.height || 1080;
+  const ratio = source.height > 0 ? source.width / source.height : 16 / 9;
+  const w = Math.max(2, Math.round((h * ratio) / 2) * 2);
+  return w * h;
 }
 
-/** 按生效参数 + 源时长估算输出体积 */
+/**
+ * CRF 模式下的等效视频码率（kbps）。
+ * 由「输出分辨率 + 编码基准码率 + CRF」推算：基准码率 = 该编码 1080p 等效质量码率，
+ * CRF 相对基准每 -6 码率约 ×2。源码率与输出画质无关，不再参与（仅作上限）。
+ */
+function crfVideoKbps(params: ResolvedParams, source: SourceInfo): number | null {
+  const base = NOOP_RATE_BASE[params.codec];
+  const crf = typeof params.crf === 'number' && params.crf > 0 ? params.crf : undefined;
+  if (params.codec === 'copy' || !Number.isFinite(base) || crf === undefined) return null;
+  const refCrf = TARGET_CRF[params.codec] ?? TARGET.crf;
+  const ratio = outputPixels(params, source) / REF_PIXELS;
+  return base * ratio * Math.pow(2, (refCrf - crf) / 6) * 1000;
+}
+
+/**
+ * 按生效参数 + 源时长估算输出体积：
+ * 视频码率优先取显式码率；CRF 模式按输出分辨率/编码/CRF 推算等效码率，
+ * 再叠加音频码率 × 时长。
+ */
 export function estimateOutputSize(
   params: ResolvedParams,
   source: SourceInfo
@@ -44,17 +60,29 @@ export function estimateOutputSize(
   const container = params.container;
   const overhead = CONTAINER_OVERHEAD[container] ?? 1.02;
   const audioKbps = params.audioCodec === 'none' ? 0 : params.audioBitrateKbps;
+  const srcMbps = source.bitrateMbps ?? 0;
 
-  let videoKbps: number;
-  let rateText: string;
-  if (typeof params.crf === 'number' && params.crf > 0) {
-    const factor = crfFactor(params.crf);
-    videoKbps = (source.bitrateMbps ?? 6) * 1000 * factor;
-    rateText = `${t('params.crfPrefix')} ${params.crf} ×${factor}`;
+  let rawVideoKbps: number;
+  let crfText: string | null = null;
+  if (params.bitrateMbps > 0) {
+    rawVideoKbps = params.bitrateMbps * 1000;
   } else {
-    videoKbps = params.bitrateMbps * 1000;
-    rateText = `${params.bitrateMbps} Mbps`;
+    const crfKbps = crfVideoKbps(params, source);
+    if (crfKbps !== null) {
+      rawVideoKbps = crfKbps;
+      crfText = `${t('params.crfPrefix')} ${params.crf}`;
+    } else {
+      // copy / 无画质参数 → 按源码率
+      rawVideoKbps = srcMbps * 1000;
+    }
   }
+
+  // C6：输出视频码率不高于源（源码率已知时）
+  const videoKbps = srcMbps > 0 ? Math.min(rawVideoKbps, srcMbps * 1000) : rawVideoKbps;
+  const videoMbps = videoKbps / 1000;
+  const rateText = crfText
+    ? `${crfText} ≈ ${videoMbps.toFixed(1)} Mbps`
+    : `${Math.round(videoMbps * 10) / 10} Mbps`;
 
   const bytes = ((videoKbps + audioKbps) / 8) * 1000 * duration * overhead;
 

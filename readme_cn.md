@@ -25,6 +25,22 @@
 - **单一配置文件** —— 应用根目录下可手动编辑的 `config.json`。
 - **10 种语言** —— 简体中文 / 繁體中文 / 日本語 / 한국어 / English / Français / Español / Português / Deutsch / Italiano，自动匹配系统语言。
 
+### 普通模式质量档位
+
+普通模式统一输出 **1080p / 30fps**，并按编码格式判定「是否需要转码」。不转码阈值与编码 CRF 都由**目标编码**决定，并随分辨率缩放（**4K = 1080p 的 ×4**）：
+
+| 目标编码 | CRF | 1080p30 阈值 | 4K30 阈值 |
+|---|---|---|---|
+| H.264 | 21 | 6.0 Mbps | 24.0 Mbps |
+| H.265 | 26 | 4.0 Mbps | 16.0 Mbps |
+| VP9 | 30 | 4.0 Mbps | 16.0 Mbps |
+| AV1 | 33 | 2.8 Mbps | 11.2 Mbps |
+
+- 仅当分辨率 / 帧率 / 码率**全部不超标**时才判 `no-op`（不转码）。
+- **现代编码之间（H.264 / H.265 / VP9 / AV1）不会仅因格式不同而重编码** —— 避免多次转码造成画质损失。
+- **旧格式**（Xvid / MPEG-4 Part 2、MPEG-2、VC-1、VP8…）或探测不到编码的源，一律兜底转码为现代编码。
+- `simpleMode.target.bitrateMbps` / `crf` 仍保留为可选的手动覆盖入口。
+
 ---
 
 ## 🚀 快速开始（开发）
@@ -68,7 +84,7 @@ npm test           # 单元测试（vitest）
   "language": "auto",      // "auto" 表示跟随系统语言
   "theme": "system",       // "system" | "light" | "dark"
   "paths": { "outputDir": "" },
-  "simpleMode": { "target": { "resolution": 1080, "fps": 30, "bitrateMbps": 6, "crf": 28 } }
+  "simpleMode": { "target": { "resolution": 1080, "fps": 30 } }  // bitrateMbps / crf 为可选手动覆盖
 }
 ```
 

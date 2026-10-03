@@ -23,7 +23,7 @@ export default function SponsorPage() {
   };
 
   return (
-    <div className="mx-auto max-w-4xl space-y-4">
+    <div className="mx-auto flex min-h-full max-w-4xl flex-col gap-4">
       {/* 头部介绍 */}
       <div className="card space-y-2">
         <h2 className="text-base font-semibold text-strong">{t('sponsor.title')}</h2>
@@ -51,6 +51,11 @@ export default function SponsorPage() {
       </div>
 
       <p className="pb-2 text-center text-xs text-muted">{t('sponsor.thanks')}</p>
+
+      {/* 右下角版本号 */}
+      <div className="mt-auto flex justify-end pt-2">
+        <span className="text-[11px] text-faint">v{__APP_VERSION__}</span>
+      </div>
     </div>
   );
 }
