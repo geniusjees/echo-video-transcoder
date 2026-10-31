@@ -77,6 +77,22 @@ describe('expert custom resolution upscale toggle', () => {
     expect(params.resolution).toBe(2160);
   });
 
+  it('downscales a 1080p source to a 720p custom target', () => {
+    const params = resolveExpertParams(
+      source({ width: 1920, height: 1080 }),
+      options({ resolution: 720 })
+    );
+    expect(params.resolution).toBe(720);
+  });
+
+  it('custom mode without an explicit value falls back to the source height', () => {
+    const params = resolveExpertParams(
+      source({ width: 1920, height: 1080 }),
+      options({ resolution: undefined })
+    );
+    expect(params.resolution).toBe(1080);
+  });
+
   it('prefers Apple MPS VideoToolbox instead of falling back to software on arm64 Macs', () => {
     const cap: HWCapability = {
       nvenc: false,

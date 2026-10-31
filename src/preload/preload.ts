@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import { IPC } from '@shared/constants';
+import type { OutputNamingOptions } from '@shared/outputPath';
 import type {
   AppConfig,
   ConcatPlan,
@@ -74,6 +75,7 @@ const api = {
     scaleResolution?: boolean;
     mode?: 'simple' | 'expert';
     expert?: ExpertOptions;
+    naming?: OutputNamingOptions;
   }): Promise<QueueItem[]> => ipcRenderer.invoke(IPC.QUEUE_ADD, arg),
 
   // ---- 决策树（§7）----

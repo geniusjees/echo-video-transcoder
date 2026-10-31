@@ -30,6 +30,9 @@ function mergeDefaults(raw: Partial<AppConfig> | null | undefined): AppConfig {
     ...raw,
     paths: { ...base.paths, ...(raw.paths ?? {}) },
     transcode: { ...base.transcode, ...(raw.transcode ?? {}) },
+    edit: { ...base.edit, ...(raw.edit ?? {}) },
+    rotate: { ...base.rotate, ...(raw.rotate ?? {}) },
+    extractAudio: { ...base.extractAudio, ...(raw.extractAudio ?? {}) },
     simpleMode: {
       ...base.simpleMode,
       ...(raw.simpleMode ?? {}),

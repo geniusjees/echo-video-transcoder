@@ -1,6 +1,9 @@
+import { useEffect } from 'react';
+import { isHwUsableForCodec, type HWFamily } from '@shared/params';
 import type { ExpertOptions, HWCapability, QueueItem, ResolvedParams } from '@shared/types';
 import ResolvedParamsPanel from '../ResolvedParamsPanel';
 import PresetManager from '../PresetManager';
+import NumberField from '../NumberField';
 import { useT } from '../../i18n';
 
 interface Props {
@@ -18,12 +21,73 @@ const FPS_LIST = [24, 25, 30, 50, 60];
 /** 专家模式面板（§13.3）：自由配置 + 封顶高亮 + 自定义预设 */
 export default function ExpertMode({ selected, hardware, options, onChange, resolved }: Props) {
   const t = useT();
+  const sourceHeight = selected?.source.height ?? 0;
+  const sourceFps = selected?.source.fps ?? 0;
 
-  const hwDisabled = (kind: string) => {
-    if (!hardware) return kind !== 'software';
-    if (kind === 'software') return false;
-    return !Boolean((hardware as unknown as Record<string, boolean>)[kind]);
-  };
+  /**
+   * 自定义档位的当前值：优先用户已选值，否则取「当前生效值」（= 源尺寸）。
+   * 若当前生效值不在预设档位里（如 800p / 29.97fps），把它补进选项，
+   * 保证下拉框显示的值与真实生效值始终一致，且切到自定义不会改变输出。
+   */
+  const resolutionValue = options.resolution ?? (resolved?.resolution || sourceHeight || 1080);
+  const fpsValue = options.fps ?? (resolved?.fps || sourceFps || 30);
+
+  const resolutionOptions = (() => {
+    const list = [...RESOLUTIONS];
+    if (resolutionValue > 0 && !list.includes(resolutionValue)) list.push(resolutionValue);
+    return list.sort((a, b) => a - b);
+  })();
+  const fpsOptions = (() => {
+    const list = [...FPS_LIST];
+    if (fpsValue > 0 && !list.includes(fpsValue)) list.push(fpsValue);
+    return list.sort((a, b) => a - b);
+  })();
+
+  /** 选了比源更高的值但没勾选「允许放大 / 提高帧率」→ 实际不生效，给出说明 */
+  const upscaleBlocked =
+    options.resolutionMode === 'custom' &&
+    sourceHeight > 0 &&
+    resolutionValue > sourceHeight &&
+    !options.allowUpscale;
+  const fpsBlocked =
+    options.fpsMode === 'custom' &&
+    sourceFps > 0 &&
+    fpsValue > sourceFps &&
+    !options.allowIncreaseFps;
+
+  // 关键：切到「自定义」时必须真正把数值写进 options。
+  // 否则 resolveExpertParams 认为没有自定义值而继续沿用源分辨率，
+  // 表现为「下拉框显示 1080p，但输出仍是源分辨率」。
+  useEffect(() => {
+    if (options.resolutionMode === 'custom' && !options.resolution) {
+      onChange({ resolution: resolutionValue });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [options.resolutionMode, options.resolution, onChange]);
+
+  useEffect(() => {
+    if (options.fpsMode === 'custom' && !options.fps) {
+      onChange({ fps: fpsValue });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [options.fpsMode, options.fps, onChange]);
+
+  /**
+   * 硬件选项是否禁用：厂商不存在，或该厂商不支持当前所选编码
+   * （如 VideoToolbox 无 AV1、老卡的 av1_nvenc/av1_amf 探测不通过）。
+   * 与选编码器的判据一致，避免「选了某硬件但实际回退软件编码」。
+   */
+  const hwDisabled = (kind: HWFamily) => !isHwUsableForCodec(hardware, kind, options.videoCodec);
+
+  const HW_FAMILIES: HWFamily[] = ['nvenc', 'qsv', 'amf', 'videotoolbox', 'vaapi'];
+  /** 当前选中的硬件在当前编码下不可用 → 实际会回退软件编码，给出提示 */
+  const selectedHwFamily = ((): HWFamily | null => {
+    const hw = options.hw;
+    if (hw === 'auto' || hw === 'software') return null;
+    const fam = (hw === 'videotoolbox-mps' ? 'videotoolbox' : hw) as HWFamily;
+    return HW_FAMILIES.includes(fam) ? fam : null;
+  })();
+  const hwFallbackWarning = selectedHwFamily !== null && hwDisabled(selectedHwFamily);
 
   return (
     <div className="space-y-3">
@@ -56,23 +120,46 @@ export default function ExpertMode({ selected, hardware, options, onChange, reso
               onChange={(e) => onChange({ hw: e.target.value as ExpertOptions['hw'] })}
             >
               <option value="auto">{t('expert.hwAuto')}</option>
-              <option value="nvenc" disabled={hwDisabled('nvenc')}>
+              <option
+                value="nvenc"
+                disabled={hwDisabled('nvenc')}
+                title={hwDisabled('nvenc') ? t('expert.hwUnavailable') : undefined}
+              >
                 NVIDIA NVENC
               </option>
-              <option value="qsv" disabled={hwDisabled('qsv')}>
+              <option
+                value="qsv"
+                disabled={hwDisabled('qsv')}
+                title={hwDisabled('qsv') ? t('expert.hwUnavailable') : undefined}
+              >
                 Intel QuickSync
               </option>
-              <option value="amf" disabled={hwDisabled('amf')}>
+              <option
+                value="amf"
+                disabled={hwDisabled('amf')}
+                title={hwDisabled('amf') ? t('expert.hwUnavailable') : undefined}
+              >
                 AMD AMF
               </option>
-              <option value="videotoolbox" disabled={hwDisabled('videotoolbox')}>
+              <option
+                value="videotoolbox"
+                disabled={hwDisabled('videotoolbox')}
+                title={hwDisabled('videotoolbox') ? t('expert.hwUnavailable') : undefined}
+              >
                 VideoToolbox / Apple MPS
               </option>
-              <option value="vaapi" disabled={hwDisabled('vaapi')}>
+              <option
+                value="vaapi"
+                disabled={hwDisabled('vaapi')}
+                title={hwDisabled('vaapi') ? t('expert.hwUnavailable') : undefined}
+              >
                 VAAPI
               </option>
               <option value="software">{t('expert.softOnly')}</option>
             </select>
+            {hwFallbackWarning && (
+              <p className="mt-1 text-xs text-warn">{t('expert.hwUnavailable')}</p>
+            )}
           </div>
 
           <div className="col-span-2">
@@ -91,10 +178,10 @@ export default function ExpertMode({ selected, hardware, options, onChange, reso
               {options.resolutionMode === 'custom' && (
                 <select
                   className="input min-w-0 flex-1"
-                  value={options.resolution ?? 1080}
+                  value={resolutionValue}
                   onChange={(e) => onChange({ resolution: Number(e.target.value) })}
                 >
-                  {RESOLUTIONS.map((r) => (
+                  {resolutionOptions.map((r) => (
                     <option key={r} value={r}>
                       {r === 2160 ? '4K (2160)' : `${r}p`}
                     </option>
@@ -112,6 +199,11 @@ export default function ExpertMode({ selected, hardware, options, onChange, reso
                 />
               </label>
             )}
+            {upscaleBlocked && (
+              <p className="mt-1 text-xs text-warn">
+                {t('expert.upscaleBlocked', { h: sourceHeight })}
+              </p>
+            )}
           </div>
 
           <div className="col-span-2">
@@ -128,10 +220,10 @@ export default function ExpertMode({ selected, hardware, options, onChange, reso
               {options.fpsMode === 'custom' && (
                 <select
                   className="input min-w-0 flex-1"
-                  value={options.fps ?? 30}
+                  value={fpsValue}
                   onChange={(e) => onChange({ fps: Number(e.target.value) })}
                 >
-                  {FPS_LIST.map((f) => (
+                  {fpsOptions.map((f) => (
                     <option key={f} value={f}>
                       {f} fps
                     </option>
@@ -148,6 +240,11 @@ export default function ExpertMode({ selected, hardware, options, onChange, reso
                   onChange={(e) => onChange({ allowIncreaseFps: e.target.checked })}
                 />
               </label>
+            )}
+            {fpsBlocked && (
+              <p className="mt-1 text-xs text-warn">
+                {t('expert.fpsBlocked', { f: sourceFps })}
+              </p>
             )}
           </div>
 
@@ -169,25 +266,21 @@ export default function ExpertMode({ selected, hardware, options, onChange, reso
           {options.bitrateMode === 'crf' ? (
             <div>
               <label className="label">{t('expert.crf')}</label>
-              <input
-                className="input"
-                type="number"
+              <NumberField
+                value={options.crf ?? 26}
                 min={0}
                 max={51}
-                value={options.crf ?? 26}
-                onChange={(e) => onChange({ crf: Number(e.target.value) })}
+                onChange={(v) => onChange({ crf: v })}
               />
             </div>
           ) : (
             <div>
               <label className="label">{t('expert.targetBitrate')}</label>
-              <input
-                className="input"
-                type="number"
-                step={0.5}
-                min={0.5}
+              <NumberField
                 value={options.bitrateMbps ?? 6}
-                onChange={(e) => onChange({ bitrateMbps: Number(e.target.value) })}
+                decimal
+                min={0.5}
+                onChange={(v) => onChange({ bitrateMbps: v })}
               />
             </div>
           )}
@@ -212,11 +305,10 @@ export default function ExpertMode({ selected, hardware, options, onChange, reso
 
           <div>
             <label className="label">{t('expert.audioBitrate')}</label>
-            <input
-              className="input"
-              type="number"
+            <NumberField
               value={options.audioBitrateKbps}
-              onChange={(e) => onChange({ audioBitrateKbps: Number(e.target.value) })}
+              min={1}
+              onChange={(v) => onChange({ audioBitrateKbps: v })}
             />
           </div>
 

@@ -4,16 +4,18 @@ import type { QueueItem, ResolvedParams, TaskPayload } from '@shared/types';
 import QueueList from '../components/QueueList';
 import CommandPreview from '../components/CommandPreview';
 import OutputFolderPicker from '../components/OutputFolderPicker';
+import SuffixOptions from '../components/SuffixOptions';
 import SimpleMode from '../components/mode/SimpleMode';
 import ExpertMode from '../components/mode/ExpertMode';
 import { useDropHandler } from '../hooks/useDropHandler';
+import { useOutputNaming } from '../hooks/useOutputNaming';
 import { useConfigStore } from '../stores/configStore';
 import { useImportStore } from '../stores/importStore';
 import { useQueueStore } from '../stores/queueStore';
 import { useParamStore } from '../stores/paramStore';
 import { useUiStore } from '../stores/uiStore';
 import { useT } from '../i18n';
-import { makeOutputPath } from '../utils/output';
+import { makeOutputPath, outputFileName } from '../utils/output';
 
 /**
  * 转码页布局：
@@ -55,6 +57,21 @@ export default function TranscodePage() {
   const [command, setCommand] = useState('');
 
   const outputDir = config?.paths.outputDir ?? '';
+
+  // ---- 输出命名设置（自定义后缀 / 与原文件同一文件夹）----
+  // 与编辑页共用同一套逻辑（useOutputNaming），但两页各自独立保存
+  const {
+    naming,
+    appendSuffix,
+    sameAsSource,
+    suffixDraft,
+    validation: suffixValidation,
+    invalid: suffixInvalid,
+    setAppendSuffix,
+    setSameAsSource,
+    onSuffixChange
+  } = useOutputNaming('transcode');
+
   const selected = useMemo(
     () => items.find((i) => i.id === selectedId) ?? items[0] ?? null,
     [items, selectedId]
@@ -78,20 +95,28 @@ export default function TranscodePage() {
     [mode, expertParams]
   );
 
+  /** 输出文件名示例（如 clip_out.mp4） */
+  const exampleName = useMemo(() => {
+    const params = selected ? effectiveFor(selected) : null;
+    const ext = params?.container ?? 'mp4';
+    return outputFileName(selected?.input ?? 'video.mp4', ext, 'transcode', naming);
+  }, [selected, effectiveFor, naming]);
+
   const handleFiles = useCallback(
     async (paths: string[]) => {
       try {
         const added = await addFiles(paths, {
           scaleResolution,
           expert: expertOptions,
-          mode
+          mode,
+          naming
         });
         if (added.length && !selectedId) setSelectedId(added[0].id);
       } catch (e) {
         onLog(`[drop] failed: ${e instanceof Error ? e.message : String(e)}`);
       }
     },
-    [addFiles, scaleResolution, expertOptions, mode, selectedId, onLog]
+    [addFiles, scaleResolution, expertOptions, mode, naming, selectedId, onLog]
   );
 
   // 窗口任意位置拖入均入队（C9）
@@ -127,8 +152,14 @@ export default function TranscodePage() {
 
   const changeOutputDir = async (dir: string) => {
     await setOutputDirCfg(dir);
-    setOutputDirForAll(dir);
+    setOutputDirForAll(dir, naming);
   };
+
+  // 输出目录/命名规则以配置为唯一事实来源：变化后（含从磁盘加载 / 其它页改动）
+  // 同步到已入队条目，避免「改了设置但队列仍用旧路径」。
+  useEffect(() => {
+    setOutputDirForAll(outputDir, naming);
+  }, [outputDir, naming, setOutputDirForAll]);
 
   // 普通模式：分辨率开关变化 → 重新走决策树（§7）
   const refreshDecisions = useCallback(
@@ -139,7 +170,7 @@ export default function TranscodePage() {
           if (it.status === 'error') return it;
           const d = await window.api.simpleDecide({ source: it.source, scaleResolution: scale });
           const out = d.params
-            ? makeOutputPath(it.input, outputDir, d.params.container, 'transcode')
+            ? makeOutputPath(it.input, outputDir, d.params.container, 'transcode', naming)
             : '';
           return {
             ...it,
@@ -165,7 +196,7 @@ export default function TranscodePage() {
       );
       if (changed) setItems(next);
     },
-    [items, mode, outputDir, setItems]
+    [items, mode, outputDir, naming, setItems]
   );
 
   const refreshExpertDecisions = useCallback(() => {
@@ -173,7 +204,9 @@ export default function TranscodePage() {
     const next = items.map((it) => {
       if (it.status === 'error') return it;
       const d = decideExpert(it.source, expertOptions, hardware ?? undefined);
-      const out = d.params ? makeOutputPath(it.input, it.outputDir, d.params.container, 'transcode') : '';
+      const out = d.params
+        ? makeOutputPath(it.input, outputDir, d.params.container, 'transcode', naming)
+        : '';
       return {
         ...it,
         decision: d,
@@ -195,7 +228,7 @@ export default function TranscodePage() {
         item.resolved !== items[index].resolved
     );
     if (changed) setItems(next);
-  }, [expertOptions, hardware, items, mode, setItems]);
+  }, [expertOptions, hardware, items, mode, outputDir, naming, setItems]);
 
   useEffect(() => {
     if (mode === 'simple') {
@@ -208,7 +241,7 @@ export default function TranscodePage() {
 
   // 命令预览（C7）
   useEffect(() => {
-    if (!selected || !outputDir || selected.status === 'error') {
+    if (!selected || (!outputDir && !sameAsSource) || selected.status === 'error') {
       setCommand('');
       return;
     }
@@ -221,7 +254,7 @@ export default function TranscodePage() {
       id: selected.id,
       kind: 'transcode',
       input: selected.input,
-      output: makeOutputPath(selected.input, outputDir, params.container, 'transcode'),
+      output: makeOutputPath(selected.input, outputDir, params.container, 'transcode', naming),
       durationSec: selected.source.durationSec,
       params
     };
@@ -232,22 +265,33 @@ export default function TranscodePage() {
     return () => {
       alive = false;
     };
-  }, [selected, outputDir, effectiveFor]);
+  }, [selected, outputDir, sameAsSource, naming, effectiveFor]);
 
-  const canStart = Boolean(outputDir) && items.some((i) => Boolean(effectiveFor(i))) && !busy;
+  const hasOutput = sameAsSource || Boolean(outputDir);
+  const canStart =
+    hasOutput && !suffixInvalid && items.some((i) => Boolean(effectiveFor(i))) && !busy;
 
   const onStart = async () => {
+    // 以「点击瞬间」的 store 状态推导参数，不依赖上一帧的 memo：
+    // 刚改完码率/CRF 就点开始时，能确保用的是最新值而不是旧参数。
+    const { expertOptions: liveOpts, mode: liveMode } = useParamStore.getState();
+    const paramsAtClick = (item: QueueItem) =>
+      liveMode === 'expert'
+        ? resolveExpertParams(item.source, liveOpts, hardware ?? undefined)
+        : effectiveFor(item);
+
     await start({
       kind: 'transcode',
-      filter: (i) => Boolean(effectiveFor(i)) && i.status !== 'done',
+      filter: (i) => Boolean(paramsAtClick(i)) && i.status !== 'done',
       build: (item) => {
-        const p = effectiveFor(item) ?? item.resolved!;
+        const p = paramsAtClick(item) ?? item.resolved!;
         return {
           id: item.id,
           kind: 'transcode' as const,
           input: item.input,
-          output:
-            item.output || makeOutputPath(item.input, item.outputDir, p.container, 'transcode'),
+          // 始终按「当前」输出目录与命名规则推导，不依赖入队时缓存的 item.output，
+          // 否则改目录后仍会写到拖入文件前的旧目录。
+          output: makeOutputPath(item.input, outputDir, p.container, 'transcode', naming),
           durationSec: item.source.durationSec,
           params: p
         };
@@ -256,7 +300,8 @@ export default function TranscodePage() {
   };
 
   return (
-    <div className="grid h-full min-h-0 grid-cols-[1fr_440px] gap-4">
+    // 左列 minmax(0,1fr)：可收缩到 0，超长文件名不会把右侧固定宽度面板挤走
+    <div className="grid h-full min-h-0 grid-cols-[minmax(0,1fr)_440px] gap-4">
       {/* 左：队列（自适应高度，超出滚动） */}
       <QueueList
         variant="fill"
@@ -273,8 +318,26 @@ export default function TranscodePage() {
       />
 
       {/* 右：设置 + 操作（自身可滚动） */}
-      <div className="min-h-0 space-y-4 overflow-y-auto pr-1">
-        <OutputFolderPicker value={outputDir} onChange={changeOutputDir} required />
+      <div className="min-h-0 min-w-0 space-y-4 overflow-y-auto pr-1">
+        <OutputFolderPicker
+          value={outputDir}
+          onChange={changeOutputDir}
+          required
+          disabled={sameAsSource}
+          showSameAsSource
+          sameAsSource={sameAsSource}
+          onSameAsSourceChange={setSameAsSource}
+        />
+
+        <SuffixOptions
+          checked={appendSuffix}
+          onCheckedChange={setAppendSuffix}
+          value={suffixDraft}
+          onValueChange={onSuffixChange}
+          validation={suffixValidation}
+          sameAsSource={sameAsSource}
+          example={exampleName}
+        />
 
         <div className="card space-y-2">
           <h3 className="text-sm font-semibold text-strong">{t('op.title')}</h3>
@@ -289,8 +352,9 @@ export default function TranscodePage() {
               {t('op.log')}
             </button>
           </div>
-          {!outputDir && <p className="text-xs text-warn">{t('op.needOutputDir')}</p>}
-          {outputDir && !items.some((i) => Boolean(effectiveFor(i))) && (
+          {!hasOutput && <p className="text-xs text-warn">{t('op.needOutputDir')}</p>}
+          {suffixInvalid && <p className="text-xs text-err">{t('op.invalidSuffix')}</p>}
+          {hasOutput && !items.some((i) => Boolean(effectiveFor(i))) && (
             <p className="text-xs text-faint">{t('op.nothing')}</p>
           )}
         </div>

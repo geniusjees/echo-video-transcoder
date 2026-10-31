@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { EditCutSegment, FlipMode, RotateMode, TaskPayload } from '@shared/types';
 import OutputFolderPicker from '../components/OutputFolderPicker';
+import SuffixOptions from '../components/SuffixOptions';
 import { useConfigStore } from '../stores/configStore';
 import { useQueueStore } from '../stores/queueStore';
 import { showAlert } from '../stores/dialogStore';
 import { useDropHandler } from '../hooks/useDropHandler';
+import { useOutputNaming } from '../hooks/useOutputNaming';
 import { useT } from '../i18n';
 import { createHoldController } from '../utils/editHold';
-import { makeOutputPath } from '../utils/output';
+import { makeOutputPath, outputFileName } from '../utils/output';
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -37,13 +39,12 @@ export default function EditPage() {
   const busy = useQueueStore((s) => s.busy);
   const setNotice = useConfigStore((s) => s.setNotice);
 
-  const [subMenu, setSubMenu] = useState<'trim' | 'rotate' | 'transcode' | null>('trim');
+  const [subMenu, setSubMenu] = useState<'trim' | 'rotate' | null>('trim');
   const [trimStart, setTrimStart] = useState(0);
   const [trimEnd, setTrimEnd] = useState(0);
   const [cutSegments, setCutSegments] = useState<EditCutSegment[]>([]);
   const [rotationMode, setRotationMode] = useState<RotateMode>(0);
   const [flipMode, setFlipMode] = useState<FlipMode>('none');
-  const [transcodeEnabled, setTranscodeEnabled] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const queueItem = useQueueStore((s) => (selectedId ? s.items.find((item) => item.id === selectedId) ?? null : null));
@@ -58,7 +59,29 @@ export default function EditPage() {
   const latestPreviewSeekRef = useRef(0);
 
   const outputDir = config?.paths.outputDir ?? '';
+
+  // ---- 输出命名设置（与转码页同一套逻辑，配置独立保存）----
+  const {
+    naming,
+    appendSuffix,
+    sameAsSource,
+    suffixDraft,
+    validation: suffixValidation,
+    invalid: suffixInvalid,
+    setAppendSuffix,
+    setSameAsSource,
+    onSuffixChange
+  } = useOutputNaming('edit');
+
+  /** 「与原文件同一文件夹」时不需要选输出目录 */
+  const hasOutput = sameAsSource || Boolean(outputDir);
+
   const selected = useMemo(() => items.find((i) => i.id === selectedId) ?? items[0] ?? null, [items, selectedId]);
+  /** 输出文件名示例（如 clip_edited.mp4） */
+  const exampleName = useMemo(
+    () => outputFileName(selected?.input ?? 'video.mp4', 'mp4', 'edit', naming),
+    [selected, naming]
+  );
   const duration = selected?.source.durationSec || 0;
   const fps = selected?.source.fps || 30;
   const frameStep = 1 / Math.max(fps, 1);
@@ -179,6 +202,11 @@ export default function EditPage() {
     }
   }, [queueItem, selected, setNotice, t]);
 
+  /** 秒级跳转（10s / 5s 按钮），始终夹在 [0, duration] 内 */
+  const seekBySeconds = (deltaSec: number) => {
+    setCurrentTime((prev) => clamp(prev + deltaSec, 0, duration));
+  };
+
   const handlePlayToggle = () => {
     if (!selected) return;
     setPlaying((prev) => {
@@ -231,10 +259,9 @@ export default function EditPage() {
   const summary = useMemo(() => {
     const changes: string[] = [];
     if (rotationMode !== 0 || flipMode !== 'none') changes.push(t('edit.summary.rotate'));
-    if (transcodeEnabled) changes.push(t('edit.summary.transcode'));
     if (cutSegments.length > 0) changes.push(t('edit.summary.trim'));
     return changes;
-  }, [cutSegments.length, duration, flipMode, rotationMode, t, transcodeEnabled]);
+  }, [cutSegments.length, duration, flipMode, rotationMode, t]);
 
   const trimSelectionVisible = trimStart !== trimEnd && trimEnd > trimStart && duration > 0;
 
@@ -309,22 +336,22 @@ export default function EditPage() {
         id: item.id,
         kind: 'edit',
         input: item.input,
-        output: makeOutputPath(item.input, item.outputDir || outputDir, 'mp4', 'edit'),
+        // 始终按当前设置推导：同目录 / 自定义后缀 / 覆盖原文件都在 makeOutputPath 内处理
+        output: makeOutputPath(item.input, outputDir, 'mp4', 'edit', naming),
         durationSec: item.source.durationSec,
         edit: {
           trimStartSec: trimStart,
           trimEndSec: trimEnd,
           cutSegments: [],
-          rotation: { mode: rotationMode, flip: flipMode, metadataOnly: false },
-          transcode: transcodeEnabled
+          rotation: { mode: rotationMode, flip: flipMode, metadataOnly: false }
         }
       })
     });
   };
 
   return (
-    <div className="grid grid-cols-[1fr_420px] gap-4">
-      <div className="space-y-4">
+    <div className="grid grid-cols-[minmax(0,1fr)_420px] gap-4">
+      <div className="min-w-0 space-y-4">
         {!selected ? (
           <div className="card flex min-h-[280px] items-center justify-center text-center text-muted">
             <div>
@@ -335,12 +362,14 @@ export default function EditPage() {
           </div>
         ) : (
           <div className="card space-y-4 p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-semibold text-strong">{selected.input.split(/[\\/]/).pop()}</p>
+            <div className="flex min-w-0 items-center justify-between gap-2">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-strong" title={selected.input.split(/[\\/]/).pop()}>
+                  {selected.input.split(/[\\/]/).pop()}
+                </p>
                 <p className="text-xs text-faint">{selected.source.width}×{selected.source.height} · {selected.source.fps}fps · {selected.source.durationSec.toFixed(1)}s</p>
               </div>
-              <button className="btn-ghost" onClick={pickFiles}>{t('edit.changeFile')}</button>
+              <button className="btn-ghost shrink-0" onClick={pickFiles}>{t('edit.changeFile')}</button>
             </div>
 
             <div className="overflow-hidden rounded-xl border border-surface-600 bg-surface-800">
@@ -391,8 +420,16 @@ export default function EditPage() {
                 }}
                 className="w-full accent-brand-500"
               />
-              <div className="flex items-center gap-2">
-                <button className="btn-ghost px-2" onClick={setTrimStartAtCurrent}>{t('edit.trim.setStart')}</button>
+              <div className="flex flex-wrap items-center justify-center gap-1.5">
+                <button className="btn-ghost px-2" title={t('edit.stepBackTitle10')} onClick={() => seekBySeconds(-10)}>
+                  ◀ {t('edit.stepBack10')}
+                </button>
+                <button className="btn-ghost px-2" title={t('edit.stepBackTitle5')} onClick={() => seekBySeconds(-5)}>
+                  ◀ {t('edit.stepBack5')}
+                </button>
+                <button className="btn-ghost px-2" title={t('edit.stepBackTitle1')} onClick={() => seekBySeconds(-1)}>
+                  ◀ {t('edit.stepBack1')}
+                </button>
                 <button
                   className="btn-ghost px-2"
                   title={t('edit.stepBackTitle')}
@@ -419,6 +456,18 @@ export default function EditPage() {
                 >
                   {t('edit.stepForward')} ▶
                 </button>
+                <button className="btn-ghost px-2" title={t('edit.stepForwardTitle1')} onClick={() => seekBySeconds(1)}>
+                  {t('edit.stepForward1')} ▶
+                </button>
+                <button className="btn-ghost px-2" title={t('edit.stepForwardTitle5')} onClick={() => seekBySeconds(5)}>
+                  {t('edit.stepForward5')} ▶
+                </button>
+                <button className="btn-ghost px-2" title={t('edit.stepForwardTitle10')} onClick={() => seekBySeconds(10)}>
+                  {t('edit.stepForward10')} ▶
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <button className="btn-ghost px-2" onClick={setTrimStartAtCurrent}>{t('edit.trim.setStart')}</button>
                 <button className="btn-ghost px-2" onClick={setTrimEndAtCurrent}>{t('edit.trim.setEnd')}</button>
               </div>
             </div>
@@ -467,7 +516,6 @@ export default function EditPage() {
           <div className="space-y-2">
             <button className={subMenu === 'trim' ? 'btn-primary w-full' : 'btn-ghost w-full'} onClick={() => setSubMenu('trim')}>{t('edit.trim')}</button>
             <button className={subMenu === 'rotate' ? 'btn-primary w-full' : 'btn-ghost w-full'} onClick={() => setSubMenu('rotate')}>{t('edit.rotate')}</button>
-            <button className={subMenu === 'transcode' ? 'btn-primary w-full' : 'btn-ghost w-full'} onClick={() => setSubMenu('transcode')}>{t('edit.transcode')}</button>
           </div>
         </div>
 
@@ -539,17 +587,26 @@ export default function EditPage() {
           </div>
         )}
 
-        {subMenu === 'transcode' && (
-          <div className="card space-y-3">
-            <h3 className="text-sm font-semibold text-strong">{t('edit.transcode')}</h3>
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={transcodeEnabled} onChange={(e) => setTranscodeEnabled(e.target.checked)} />
-              {t('edit.transcode.enable')}
-            </label>
-          </div>
-        )}
+        <OutputFolderPicker
+          value={outputDir}
+          onChange={changeOutputDir}
+          required
+          disabled={sameAsSource}
+          showSameAsSource
+          sameAsSource={sameAsSource}
+          onSameAsSourceChange={setSameAsSource}
+        />
 
-        <OutputFolderPicker value={outputDir} onChange={changeOutputDir} required />
+        <SuffixOptions
+          title={t('suffix.titleEdit')}
+          checked={appendSuffix}
+          onCheckedChange={setAppendSuffix}
+          value={suffixDraft}
+          onValueChange={onSuffixChange}
+          validation={suffixValidation}
+          sameAsSource={sameAsSource}
+          example={exampleName}
+        />
 
         {editProgressVisible && (
           <div className="card space-y-2 p-3">
@@ -563,7 +620,13 @@ export default function EditPage() {
           </div>
         )}
 
-        <button className="btn-primary w-full" disabled={!outputDir || !selected || busy} onClick={() => void onStart()}>
+        {suffixInvalid && <p className="text-xs text-err">{t('op.invalidSuffix')}</p>}
+
+        <button
+          className="btn-primary w-full"
+          disabled={!hasOutput || suffixInvalid || !selected || busy}
+          onClick={() => void onStart()}
+        >
           ▶ {t('edit.start')}
         </button>
       </div>

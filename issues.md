@@ -1,7 +1,7 @@
 # 修复记录（Issue Log）
 
-> 最近更新：2026-10-02
-> 验证方式：`npx tsc --noEmit` + `npx vitest run`（11 个测试文件 / 77 个用例）；关键项另做端到端验证，方式记在各自条目里。
+> 最近更新：2026-10-30
+> 验证方式：`npm run typecheck` + `npm test`（19 个测试文件 / 140 个用例）+ `npm run build`；关键项另做端到端验证，方式记在各自条目里。
 
 ## 汇总
 
@@ -24,6 +24,21 @@
 | 09-30 | 15 | 普通模式按编码设置「不转码」阈值，默认 CRF 调整为 26 | 共享配置 / 决策树 | 阈值一刀切 | ✅ |
 | 10-02 | 16 | 硬件编码器命令里不写画质参数（CRF 被完全丢弃） | 主进程命令构建 | 仅软件编码器写 `-crf` | ✅ |
 | 10-02 | 17 | 输出体积预估严重偏大（与输出分辨率/编码无关） | 渲染进程 | 用「源码率 × 系数」估算 | ✅ |
+| 10-09 | 18 | 转码模式改了输出目录，任务仍写入拖入文件前的旧目录 | 渲染 / 主进程 | 路径入队即缓存 + 命名不一致 | ✅ |
+| 10-09 | 19 | 硬件侦测把「编译进来的编码器」当成本机硬件；探测帧过小致 NVENC 被误判不可用 | 主进程硬件侦测 | 编译期能力 ≠ 本机硬件 | ✅ |
+| 10-09 | 20 | 选 AMF/NVENC + AV1 时静默回退软件（厂商可用 ≠ 该编码可用） | 共享配置 / UI | 只按厂商判断 | ✅ |
+| 10-09 | 21 | 硬件编码运行时打不开，整个任务直接失败 | 主进程任务 | 缺少兜底 | ✅ |
+| 10-28 | 22 | 转码输出支持自定义文件名后缀（≤16 字符、跨平台校验）与「与原文件同一文件夹」 | 共享配置 / 渲染 / 主进程 | 新功能 | ✅ |
+| 10-28 | 23 | 输出与原文件同名时 ffmpeg 直接截断输入文件 | 主进程任务 | 原地写未做保护 | ✅ |
+| 10-28 | 24 | 超长文件名把右侧固定宽度面板挤出可视区 | 渲染进程布局 | `1fr` 最小宽度取内容宽度 | ✅ |
+| 10-28 | 25 | 专家模式自定义分辨率不生效（勾选「允许放大」也不放大） | 渲染 / 主进程命令构建 | 只改显示不改状态 + 滤镜条件错误 | ✅ |
+| 10-28 | 26 | `npm run dist` 因调试注入的 `NODE_OPTIONS` 失败；打包配置会挂调试器 | 工具链 / 调试配置 | 环境变量污染 | ✅ |
+| 10-29 | 27 | 专家模式改完 CRF / 视频码率 / 音频码率后点开始，仍用改动前的值 | 渲染进程输入 | 受控 number 输入把中间态写成 0 | ✅ |
+| 10-29 | 28 | `npm run dev` 再次因 `NODE_OPTIONS` 指向已删除的 VS Code build 目录而崩溃 | 工具链 / 调试配置 | 终端自动附加残留 | ✅ |
+| 10-30 | 29 | 后缀 / 「与原文件同一文件夹」只有转码页可设，编辑与旋转页无法配置 | 共享配置 / 渲染进程 | 设置未按页隔离 | ✅ |
+| 10-30 | 30 | 编辑页的「转码」开关只有一个复选框，容易被误解为可配置编码参数 | 渲染 / 共享类型 / 主进程命令构建 | 功能设计与实际能力不符 | ✅ |
+| 10-30 | 31 | 提取音频无法「提取到原始文件夹」，只能另选输出目录 | 共享配置 / 渲染进程 | 功能缺失 | ✅ |
+| 10-30 | 32 | 编辑页只有 1 帧步进，长视频定位慢（新增 10s / 5s / 1s 前进后退） | 渲染进程 | 功能缺失 | ✅ |
 
 ---
 
@@ -528,6 +543,403 @@ videoKbps = (source.bitrateMbps ?? 6) * 1000 * crfFactor(params.crf);
 
 ---
 
+# 2026-10-09
+
+## Issue 18 · 转码模式改了输出目录，任务仍写入拖入文件前的旧目录
+
+**现象**
+- 先拖入待转码文件，再修改输出文件夹；点「开始」后输出仍落在**改之前**的目录里。
+
+**根因**
+- 输出路径在**入队时**就被算好并缓存进每个队列条目（主进程 `buildOutputPath` → `item.output`），开始时 `onStart` 又优先使用这个缓存值；改目录只靠一次 `setOutputDirForAll()` 刷新条目，一旦遗漏或竞态就会残留旧目录。
+- 更麻烦的是主/渲染两侧**生成文件名的规则不一致**：主进程 `名字_out.mp4`、渲染进程 `名字.mp4`，于是命令预览 ≠ 实际路径，改目录时文件名还会悄悄变化。
+
+**修复**
+
+| 文件 | 改动 |
+|---|---|
+| `src/shared/outputPath.ts`（新增） | 主/渲染**共用**的 `makeOutputPath()`（transcode `_out`、rotate `_rotated`、edit `_edited`），单一实现 |
+| `src/renderer/utils/output.ts` | 改为从 `@shared/outputPath` 再导出 |
+| `src/main/ipc/queue.ipc.ts` | 入队改用共享实现，删除本地 `buildOutputPath` |
+| `src/renderer/pages/TranscodePage.tsx` | 开始时按**当前**输出目录实时推导路径；新增 effect：配置目录变化即同步已入队条目 |
+| `src/renderer/stores/queueStore.ts` | `setOutputDirForAll` 幂等（目录未变不产生新状态） |
+
+**验证**
+- 新增 `tests/outputPath.test.ts`（5 用例）与 `tests/queueOutputDir.test.ts`（2 用例），全部通过。
+
+---
+
+## Issue 19 · 硬件侦测不可靠：把「编译进来的编码器」当成「本机硬件」
+
+**现象（需求引出）**
+- 专家模式要求：先检测硬件，本机没有的硬件灰色不可选，软件编码始终可选作为兜底。但选项一直灰不掉——**任何装了标准 ffmpeg 的机器都显示 NVENC/QSV/AMF 可用**。
+
+**根因**
+- `detect()` 用 `ffmpeg -encoders` 判断能力，而它列出的是**编译期**包含的编码器：标准构建在没有对应硬件的机器上同样会列出 `h264_nvenc / hevc_nvenc / h264_qsv / h264_amf …` → `cap.nvenc` 恒为真，选项灰不掉，实际编码还会失败。
+
+**修复（真实探测）**
+- 新增 `probeHardwareEncoder()`：用该编码器**实际编码 1 帧**到 `-f null -`，退出码 0 才算本机可用；
+- 每个厂商探测一列候选（`nvenc: hevc/h264/av1`、`qsv`、`amf`、`videotoolbox`、`vaapi`），任一成功即认为该厂商可用，并把通过的编码器名记入 `HWCapability.probedEncoders`；
+- 只探测「编译进来 + 平台相关」的厂商（VAAPI→Linux，VideoToolbox→macOS），并行执行，结果由 `detectCached` 缓存。
+
+**回归（本会话第一版引入后自行修复）**
+- 第一版探测帧用了 `128x128`，低于 NVENC 的最小支持尺寸，报
+  `InitializeEncoder failed: invalid param (8): Frame dimensions are less than the minimum supported value`(-22)，
+  直接导致**「专家模式下一个硬件加速都没有了」**（NVENC 被误判为不可用）。
+- 本机实测：`128x128 → exit=-22`；`640x480 → exit=0`（`hevc_nvenc` / `h264_nvenc` 均通过）。
+- 修复：探测帧改为 **`640x480`**。
+
+**实测（本机 `ffmpeg/bin/ffmpeg.exe`）**：`hevc_nvenc` / `h264_nvenc` / `hevc_amf` / `h264_amf` → 0；`hevc_qsv` / `av1_qsv` / `av1_nvenc` / `av1_amf` → 失败（符合预期）。
+
+**验证**
+- `tests/encoderProbe.test.ts` 覆盖探测参数与编码器选择逻辑。
+
+---
+
+## Issue 20 · 「厂商可用」≠「该编码可用」：选 AMF/NVENC + AV1 时静默回退软件
+
+**现象**
+- 专家模式选「AMD AMF」，实际却跑了**纯软件编码**（`libsvtav1` 等）。
+
+**根因**
+- 硬件选项只按**厂商**判断可用（`cap.amf` 为真即可选），没有结合**所选编码**；
+- 而 `pickEncoderName` 会按具体编码器名做二次判断（必须命中 `probedEncoders`），于是「AV1 + AMF」→ `av1_amf` 不在探测通过列表 → **静默回退软件**，界面却仍显示已选 AMF。
+
+**实测（本机）**：`hevc_amf` / `h264_amf` 可用，但 **`av1_amf` / `av1_nvenc` 不可用** → 选 AV1 时两者都会回退软件。
+
+**修复**
+- `src/shared/params.ts` 新增 `HWFamily` 与 `isHwUsableForCodec(cap, hw, codec)`：厂商存在 + 该厂商支持此编码 + 该编码器探测通过（**与选编码器使用同一判据**）；
+- `ExpertMode` 的 `hwDisabled()` 改用该函数 → 选 AV1 时 AMF/NVENC 自动灰色不可选，VideoToolbox 在 AV1/VP9 下禁用；当前已选硬件变得不可用时，下拉框下方显示提示。
+
+**验证**
+- `tests/encoderProbe.test.ts` 新增 3 组用例（AMF+AV1 禁用、VT 无 AV1/VP9、厂商不存在/copy/未侦测）。
+
+---
+
+## Issue 21 · 硬件编码运行时打不开，整个任务直接失败
+
+**现象**
+- 实际转码时 `hevc_amf` 打开编码器失败：`Could not open encoder before EOF`、`-22 / -1313558101`，任务直接失败且无产出（`frame=0`）。
+- 排查：用同一份输入、同一个 ffmpeg、完整命令形状手工执行均**成功** → 属**特定素材/驱动状态**下的运行时失败，无法在静态检测阶段拦截。
+
+**修复（运行时兜底）**
+- `src/main/transcoder/taskRunner.ts` 拆出 `execFfmpeg()`，记录本次所用编码器与产出帧数；
+- **硬件编码器 + 0 帧产出** 时自动改用**软件编码重试一次**，并输出日志
+  `[兜底] 硬件编码失败（hevc_amf），改用软件编码重试：<文件>`；
+- `src/main/transcoder/commandBuilder.ts`：`CommandContext.forceSoftware` 支持强制软件编码（对转码 / 旋转等所有走 `-c:v` 的任务生效）。
+
+**验证**
+- 新增 `tests/softwareFallback.test.ts`（3 用例）：忽略硬件选择、生成软件命令、`copy` 不受影响。
+
+---
+
+**变更文件（10-09 汇总）**
+- 新增：`src/shared/outputPath.ts`、`tests/outputPath.test.ts`、`tests/queueOutputDir.test.ts`、`tests/softwareFallback.test.ts`、`tests/encoderProbe.test.ts`
+- 修改：`src/main/hardware/detector.ts`、`src/main/transcoder/commandBuilder.ts`、`src/main/transcoder/taskRunner.ts`、`src/main/ipc/queue.ipc.ts`、`src/renderer/utils/output.ts`、`src/renderer/pages/TranscodePage.tsx`、`src/renderer/stores/queueStore.ts`、`src/renderer/components/mode/ExpertMode.tsx`、`src/shared/params.ts`、`src/shared/types.ts`
+
+**验证（10-09 汇总）**
+- `npx tsc --noEmit` 无错误；`npx vitest run` **16 个测试文件 / 109 个用例**全部通过；`npm run build` 成功。
+
+---
+
+# 2026-10-28
+
+## Issue 22 · 转码输出支持自定义后缀与「与原文件同一文件夹」（新功能）
+
+**需求**
+- 转码模式新增 checkbox「是否转码后添加后缀」，勾选后显示**最长 16 字符**的输入框；输入 `_out` → 输出 `原名_out.mp4`；输入内容需按**所有操作系统**的文件名规则校验。
+- 输出文件夹处新增 checkbox「是否和原文件同一个文件夹」，勾选后**禁用输出文件夹输入框**，每个文件输出到**各自输入文件所在目录**。
+- 同目录 + 未设置后缀 → **覆盖原文件**。
+- 新增文案同步 10 种语言。
+
+**实现**
+
+| 文件 | 改动 |
+|---|---|
+| `src/shared/outputPath.ts` | 新增 `MAX_SUFFIX_LENGTH`(16)、`validateSuffix()`（空 / 超长 / 保留字符 `< > : " / \ \| ? *` / 控制字符 / 以 `.` 结尾）、`resolveSuffix()`、`outputFileName()`；`makeOutputPath()` 增补 `OutputNamingOptions`（`appendSuffix` / `suffix` / `sameAsSource`）。后缀非法时回退默认 `_out`，绝不生成无法创建的文件名 |
+| `src/shared/types.ts`、`constants.ts`、`config.json` | `TranscodeConfig` 新增 `appendSuffix`(默认 `true`) / `suffix`(`_out`) / `outputSameAsSource`(`false`)；默认行为与改动前完全一致，老配置由 `mergeDefaults` 补齐 |
+| `src/main/ipc/queue.ipc.ts` | 入队时按渲染进程传来的 `naming` 计算输出路径；其它页面不传 → 保持任务类型默认后缀 |
+| `src/renderer/components/OutputFolderPicker.tsx` | 新增 `disabled`（勾选同目录时禁用输入与浏览）与「与原文件同一文件夹」勾选框 |
+| `src/renderer/components/SuffixOptions.tsx`（新增） | 后缀 checkbox + 16 字符输入 + 实时校验提示 + 文件名示例 + 覆盖原文件红色警告 |
+| `src/renderer/pages/TranscodePage.tsx` | 接入两项设置；后缀非法时禁用「开始」；同目录时不再要求输出文件夹；后缀输入 400ms 防抖落盘（避免连续输入丢字）；入队 / 命令预览 / 开始统一使用同一命名规则 |
+| `src/renderer/stores/configStore.ts`、`queueStore.ts` | 新增 `setTranscodeConfig()`；`setOutputDirForAll(dir, naming)` 同时比对目录与命名 |
+| `src/renderer/i18n/locales/*.json` | 10 份新增 `out.sameAsSource*`、`suffix.*`、`op.invalidSuffix` |
+
+**验证**
+- 新增 `tests/outputNaming.test.ts`（14 用例：校验规则 + 命名规则），`tests/queueOutputDir.test.ts` 增补 2 例。
+
+---
+
+## Issue 23 · 覆盖原文件时 ffmpeg 直接截断输入文件
+
+**现象**
+- 勾选「与原文件同一文件夹」并取消后缀 → 输出路径等于输入路径，ffmpeg 打开输出文件时把源文件截断，任务失败且源文件可能损坏。
+
+**根因**
+- `runFfmpeg()` 把 `payload.output` 原样交给 ffmpeg，没有处理「原地写」。
+
+**修复**（`src/main/transcoder/taskRunner.ts`）
+- 新增 `isSamePath()`（Windows 忽略大小写）与 `tempOutputFor()`：临时文件与目标**同目录**、**保留原扩展名**（ffmpeg 靠扩展名判断封装格式）；
+- 输出 == 输入时先写 `<名字>.tmp-<taskId>.<ext>`，成功后 `replaceFile()`（`rename` 覆盖，跨设备失败退回复制）替换原文件；
+- 失败 / 异常时在 `finally` 中清理临时文件；软件兜底重试复用同一个临时文件。
+
+**验证**
+- 新增 `tests/inplaceOutput.test.ts`（3 用例：同路径判断、临时文件同目录且保留扩展名）。
+
+---
+
+## Issue 24 · 超长文件名把右侧固定宽度面板挤出可视区
+
+**现象**
+- 拖入超长文件名后整个布局变化：右侧菜单被挤出可视区 / 出现横向滚动。
+
+**根因**
+- `grid-cols-[1fr_440px]` 中的 `1fr` 等价于 `minmax(auto, 1fr)`，其最小宽度取**内容最小宽度**；超长且不可断行的文件名把左轨道撑大，右轨道被推出容器。
+
+**修复**
+- 5 个页面（转码 / 旋转 / 提取音频 / 编辑 / 拼接）统一改为 `grid-cols-[minmax(0,1fr)_XXXpx]`，左列加 `min-w-0`；
+- `QueueList`：标题 `truncate` + 按钮组 `shrink-0`；条目名 `min-w-0 truncate` 并加 `title`（悬浮看全名）；元信息 / 错误信息 `break-words`；根容器 `min-w-0`；
+- 编辑页文件名（原先未截断）同样加 `min-w-0 truncate` + `title`，「更换文件」按钮 `shrink-0`；
+- 转码页右列补 `min-w-0`，防止内容反向溢出轨道。
+
+**验证**
+- 构建产物 CSS 确认生成 `grid-template-columns: minmax(0,1fr) 440px`（及 380 / 420 变体）；typecheck / 测试 / 构建通过。
+
+---
+
+## Issue 25 · 专家模式自定义分辨率不生效
+
+**现象**
+- 专家模式切到「自定义分辨率」后，输出仍是源分辨率；即使勾选「允许放大」也不放大。
+
+**根因（两处）**
+
+1. `ExpertMode` 的下拉框 `value={options.resolution ?? 1080}` **只改显示、不改状态**：`options.resolution` 始终是 `undefined` → `resolveExpertParams()` 回退成源高度。更隐蔽的是：4K 源时下拉框默认显示 `1080p`，用户去点 `1080p`（与当前显示相同）**不会触发 `onChange`**，自定义值永远写不进去。
+2. `commandBuilder.buildFilters()` 只在 `params.resolution < source.height` 时才加 `scale`，勾选放大后 `target > source` 条件不成立 → 完全没有滤镜，参数面板却显示放大后的值。
+
+**修复**
+
+| 文件 | 改动 |
+|---|---|
+| `src/renderer/components/mode/ExpertMode.tsx` | 自定义档位的值改为「当前生效值」，并把非标准档位（800p / 29.97fps）补进选项，保证显示值 == 实际生效值；用 `useEffect` 在切到自定义时把 `resolution` / `fps` 真正写入 options（fps 同类问题一并修）；新增「允许放大 / 提高帧率未勾选 → 不生效」提示 |
+| `src/main/transcoder/commandBuilder.ts` | 「绝不放大」的封顶只在上游 `applyCaps` 完成，滤镜条件由 `<` 改为 `!== source.height` |
+| `src/renderer/i18n/locales/*.json` | 10 份新增 `expert.upscaleBlocked` / `expert.fpsBlocked` |
+
+**验证**
+- `tests/commandBuilder.test.ts` 新增 4 例（720 下采样 / 等于源不加滤镜 / 2160 放大 / 16:9 保持比例）；
+- `tests/expertParams.test.ts` 新增 2 例（1080→720 下采样 / custom 无值时回退源高度）。
+
+---
+
+## Issue 26 · 工具链：`npm run dist` 被调试注入的 `NODE_OPTIONS` 打挂
+
+**现象**
+- `npm run dist` 报 `Cannot find module '…/ms-vscode.js-debug/src/bootloader.js'`。
+
+**根因**
+- VS Code 的「自动附加调试」会向终端注入 `NODE_OPTIONS=--require <js-debug>/bootloader.js`；该路径带版本哈希（`04c0d99f4f` → 现存 `2a59476c9b`），旧路径失效。与项目本身无关。
+- 另：`.vscode/launch.json` 的「打包」配置未设 `noDebug`，启动 `npm run dist` 时会向子进程注入调试器。
+
+**修复**
+- 打包时清空环境变量：`$env:NODE_OPTIONS=$null; npm run dist` → 产出 Setup / portable 0.1.1（各约 162 MB）。
+- `.vscode/launch.json`：开发配置补 `sourceMaps` + `outFiles`；打包配置加 `"noDebug": true` 并改名为「Electron: 打包 (npm run dist，不调试)」。
+
+---
+
+**变更文件（10-28 汇总）**
+- 新增：`src/renderer/components/SuffixOptions.tsx`、`tests/outputNaming.test.ts`、`tests/inplaceOutput.test.ts`
+- 修改：`src/shared/outputPath.ts`、`src/shared/types.ts`、`src/shared/constants.ts`、`config.json`、`src/preload/preload.ts`、`src/main/ipc/queue.ipc.ts`、`src/main/transcoder/taskRunner.ts`、`src/main/transcoder/commandBuilder.ts`、`src/renderer/components/OutputFolderPicker.tsx`、`src/renderer/components/QueueList.tsx`、`src/renderer/components/mode/ExpertMode.tsx`、`src/renderer/pages/TranscodePage.tsx`、`src/renderer/pages/RotatePage.tsx`、`src/renderer/pages/ExtractAudioPage.tsx`、`src/renderer/pages/EditPage.tsx`、`src/renderer/pages/ConcatPage.tsx`、`src/renderer/stores/configStore.ts`、`src/renderer/stores/queueStore.ts`、`src/renderer/utils/output.ts`、`src/renderer/i18n/locales/*.json`（10 份）、`.vscode/launch.json`、`tests/commandBuilder.test.ts`、`tests/expertParams.test.ts`、`tests/queueOutputDir.test.ts`
+
+**验证（10-28 汇总）**
+- `npm run typecheck` 无错误；`npm test` **18 个测试文件 / 134 个用例**全部通过；`npm run build` 成功。
+- 10 份语言文件 JSON 解析通过，本轮新增 key（`out.sameAsSource*`、`suffix.*`、`op.invalidSuffix`、`expert.upscaleBlocked`、`expert.fpsBlocked`）均已补齐。
+
+---
+
+# 2026-10-29
+
+## Issue 27 · 改完 CRF / 码率后点开始，仍使用改动前的值
+
+**现象**
+- 专家模式里调整 CRF、目标码率或音频码率后立刻点「开始」，任务仍用改动前的参数（有时是 0）；输入框里看上去却已经是新值。
+- 体感像「失焦才生效」。
+
+**根因**
+- 输入绑的确实是 `onChange`，但用的是受控 `type="number"`：
+  - 清空输入框或处于中间态（`8.`、`1e` 等）时，浏览器把 `input.value` 变成**空串** → `Number('') === 0` → 立刻把 **0** 写进状态，之后的字符拼在 0 后面（`0192`）；
+  - 带 `step` 的小数码率框，按下 `.` 的那一刻值被判为空 → 状态被改成 0，最终提交的值与看到的不是同一个数；
+  - 于是「开始」读到的是 0 或被中途覆盖的旧值，而预览面板又按某个瞬时值渲染，看起来像改了没生效。
+
+**修复**
+
+| 文件 | 改动 |
+|---|---|
+| `src/renderer/components/NumberField.tsx`（新增） | 数字输入组件：**每次击键提交合法值**（on change 生效，不依赖失焦）；`normalizeNumberText()` 输入时去掉多余前导 0（`0192`→`192`、`00.5`→`0.5`、`0.5` 保留、`000`→`0`）并过滤非数字/多余小数点；空串、`.`、非数字、越界的**中间态不写入状态**（避免 0 / NaN 进 ffmpeg）；失焦只做兜底（空值回退已提交值、越界夹到 min/max）；外部值变化（切换预设）时同步，输入中不打断 |
+| `src/renderer/components/mode/ExpertMode.tsx` | CRF（整数 0–51）、目标码率（小数 ≥0.5）、音频码率（≥1）改用 `NumberField` |
+| `src/renderer/pages/ExtractAudioPage.tsx` | 音频码率（≥1）改用 `NumberField` |
+| `src/renderer/pages/TranscodePage.tsx` | `onStart` 在**点击瞬间**从 `useParamStore.getState()` 读取最新 `expertOptions` 重新推导参数，不再依赖上一帧 memo（双保险） |
+
+**验证**
+- 新增 `tests/numberField.test.ts`（4 例：整数去前导 0、小数保留 `0.5`、非法字符/多余小数点过滤、空值不提交）。
+- `npm run typecheck` 无错误；`npm test` 19 个文件 / 138 用例通过；`npm run build` 成功。
+
+---
+
+## Issue 28 · `npm run dev` 再次因 `NODE_OPTIONS` 崩溃（VS Code build 目录变更）
+
+**现象**
+- `npm run dev` 连 electron-vite 都没启动就退出：
+  `Cannot find module '…/Microsoft VS Code/2a59476c9b/…/ms-vscode.js-debug/src/bootloader.js'`
+- 前一天（Issue 26）报的是 `04c0d99f4f`，这次换成了 `2a59476c9b`。
+
+**根因**
+- VS Code 升级后又换了 build 目录：`2a59476c9b` **已被删除**，当前为 `e646868227`（其 `src/bootloader.js` 存在）。
+- 已开着的集成终端里仍残留旧会话注入的 `NODE_OPTIONS=--require <旧路径>`；node 在 `--require` 预加载阶段就 `MODULE_NOT_FOUND`，导致任何 npm 命令都无法启动，与项目代码无关。
+- Issue 26 当时只做了「每次手动清空环境变量」的临时处理，没有关掉注入源，所以会随 VS Code 升级反复出现。
+
+**修复**
+- 新增 `.vscode/settings.json`：`"debug.javascript.autoAttachFilter": "disabled"`。
+  - 这就是向集成终端注入 `NODE_OPTIONS` + `VSCODE_INSPECTOR_OPTIONS` 的开关；关掉后本工作区的新终端不再注入。
+  - 本项目调试走 `.vscode/launch.json`（`autoAttachChildProcesses` 负责子进程），不依赖终端自动附加。
+  - 已核对本机 js-debug 扩展的 `package.json`：该设置合法（枚举 `always|smart|onlyWithFlag|disabled`），且 `disabled` 本来就是它的默认值——此前被切成了 `always`。
+  - 如需恢复：改回 `"smart"` / `"always"` 并重启 VS Code（让扩展路径重新解析）。
+
+**临时恢复方式**（不改配置时）
+```powershell
+$env:NODE_OPTIONS=$null
+$env:VSCODE_INSPECTOR_OPTIONS=$null
+npm run dev
+```
+或直接新建终端 / 重启 VS Code。注意**已存在的终端不会自动清除**残留变量。
+
+**验证**
+- `Test-Path …/2a59476c9b/…/bootloader.js` → `False`；`…/e646868227/…/src/bootloader.js` → `True`。
+- 手动把 `NODE_OPTIONS` 指到旧路径启动 node → 复现 `MODULE_NOT_FOUND`；清空后 `node -e` 正常输出。
+- 本机 js-debug `package.json` 中 `debug.javascript.autoAttachFilter` 的枚举与默认值已确认。
+
+---
+
+**变更文件（10-29 汇总）**
+- 新增：`src/renderer/components/NumberField.tsx`、`tests/numberField.test.ts`、`.vscode/settings.json`
+- 修改：`src/renderer/components/mode/ExpertMode.tsx`、`src/renderer/pages/ExtractAudioPage.tsx`、`src/renderer/pages/TranscodePage.tsx`
+
+**验证（10-29 汇总）**
+- `npm run typecheck` 无错误；`npm test` **19 个测试文件 / 138 个用例**全部通过；`npm run build` 成功。
+
+---
+
+# 2026-10-30
+
+## Issue 29 · 后缀 / 「与原文件同一文件夹」在转码、编辑、旋转三页统一且各自独立保存
+
+**背景 / 需求**
+- 转码页已有「自定义文件名后缀」+「与原文件同一文件夹」；编辑页、旋转页没有对应设置，行为不一致。
+- 要求三页逻辑完全一致，但**配置各自独立**（各页记住自己的选择，互不覆盖）；输出文件夹仍是共享设置。
+
+**根因**
+- 这套设置原先直接写在 `TranscodePage` 内部，只有 `TranscodeConfig` 一个配置段，其它页要复用只能复制逻辑，必然出现「改一页影响另一页」或「两页规则不一致」。
+
+**修复**
+
+| 文件 | 改动 |
+|---|---|
+| `src/shared/types.ts` | 新增 `EditConfig` / `RotateConfig`（`appendSuffix` / `suffix` / `outputSameAsSource`），`AppConfig` 增加 `edit`、`rotate` 两段 |
+| `src/shared/constants.ts` | `DEFAULT_CONFIG` 补 `edit: { appendSuffix: true, suffix: '_edited', ... }`、`rotate: { ..., suffix: '_rotated' }` |
+| `src/main/config/configStore.ts` | `mergeDefaults` 合并 `edit` / `rotate`，老配置文件自动补齐默认值 |
+| `src/renderer/hooks/useOutputNaming.ts`（新增） | `NamingScope = 'transcode' \| 'edit' \| 'rotate'`，按 scope 读写各自配置段；后缀输入用本地草稿 + 400ms 防抖落盘，避免逐字符写配置文件与丢字 |
+| `src/renderer/components/SuffixOptions.tsx`（新增） | 三页共用的后缀设置卡片：勾选、16 字符计数、跨平台校验提示、同目录且无后缀时的覆盖原文件警告；标题按页传入 |
+| `src/renderer/pages/TranscodePage.tsx` | 改为 `useOutputNaming('transcode')` + `SuffixOptions`，删除页内重复逻辑 |
+| `src/renderer/pages/EditPage.tsx` / `RotatePage.tsx` | 分别接入 `useOutputNaming('edit')` / `useOutputNaming('rotate')`，输出路径统一走 `makeOutputPath(..., naming)` |
+| `src/renderer/stores/configStore.ts` | 新增 `setEditConfig` / `setRotateConfig`（与 `setTranscodeConfig` 同构） |
+| `src/shared/outputPath.ts` | `CUSTOM_SUFFIX_KINDS` 覆盖 transcode / edit / rotate；`makeOutputPath` 的 `sameAsSource` 对三页一致生效 |
+| `src/renderer/i18n/locales/*.json`（10 份） | 新增 `suffix.titleEdit` / `suffix.titleRotate` |
+| `tests/outputNaming.test.ts`（新增） | 16 用例：后缀校验、`resolveSuffix` 回退、`makeOutputPath` 同目录 / 覆盖判定 |
+
+**效果**
+- 三页各自记住「是否加后缀 / 后缀内容 / 是否输出到原目录」，互不影响；输出文件夹仍共享。
+- 同目录且未加后缀 = 覆盖原文件，UI 给出红色提示；实际写入由 Issue 23 的临时文件 + 改名机制兜底，不会截断源文件。
+
+**验证**
+- `npx tsc --noEmit` 无错误；`npx vitest run` 19 个文件 / 140 用例全部通过；10 份语言包 JSON 解析通过。
+
+---
+
+## Issue 30 · 移除编辑页的「转码」开关（避免误导）
+
+**现象**
+- 编辑页左侧有「转码」子菜单，点开后只有一个「启用转码（默认不转码）」复选框，没有任何编码器 / 码率 / 分辨率选项。
+- 用户看到「转码」会以为能配置编码参数，实际它只是一个布尔值。
+
+**根因**
+- 该开关是早期为「是否重编码」加的：`EditOptions.transcode` → `buildEditArgs` 里 `isSimpleTrim = !hasCutSegments && !filters.length && !opts.transcode`。
+- 但它并不能带来任何参数控制，只是在无滤镜时把纯裁剪从 `-c copy` 强制改成 `libx264 / crf 23` 重编码，与「裁剪应无损」的直觉相反。
+
+**修复**
+
+| 文件 | 改动 |
+|---|---|
+| `src/renderer/pages/EditPage.tsx` | 删除 `transcodeEnabled` 状态、子菜单项、选项卡片、摘要条目与 payload 字段；`subMenu` 收窄为 `'trim' \| 'rotate' \| null` |
+| `src/shared/types.ts` | `EditOptions` 移除 `transcode?: boolean` |
+| `src/main/transcoder/commandBuilder.ts` | `buildEditArgs` 去掉 `transcode` 入参，判定改为 `isSimpleTrim = !hasCutSegments && !filters.length`；`buildArgsForTask` 同步去掉透传 |
+| `src/renderer/i18n/locales/*.json`（10 份） | 删除 `edit.transcode`、`edit.transcode.enable`、`edit.summary.transcode` |
+| `tests/editCommand.test.ts` | 用例去掉 `transcode: false` |
+
+**效果**
+- 编辑页行为回归：无旋转 / 翻转的纯裁剪走 `-c copy`（无损、快），有旋转 / 翻转才重编码；不再暴露含义模糊的开关。
+- 与转码页的分工更清晰：需要控制编码参数请用转码页。
+
+**验证**
+- `npx tsc --noEmit` 无错误；`npx vitest run` 全部通过；`Select-String` 全仓确认无残留引用（`transcodeEnabled` / `edit.transcode*` 均为 0 命中）。
+
+---
+
+## Issue 31 · 提取音频支持「提取到原始文件夹」（不需要后缀）
+
+**需求**
+- 提取音频的输出扩展名（mp3 / aac / wav / flac / opus）与源视频不同，不存在覆盖问题，因此只需要一个「提取到原始文件夹」勾选框，**不需要后缀设置**。
+
+**修复**
+
+| 文件 | 改动 |
+|---|---|
+| `src/shared/types.ts` | 新增 `ExtractAudioConfig { outputSameAsSource: boolean }`，挂到 `AppConfig.extractAudio` |
+| `src/shared/constants.ts` | 默认 `extractAudio: { outputSameAsSource: false }` |
+| `src/main/config/configStore.ts` | `mergeDefaults` 合并 `extractAudio` 段 |
+| `src/renderer/stores/configStore.ts` | 新增 `setExtractAudioConfig` |
+| `src/renderer/pages/ExtractAudioPage.tsx` | 勾选后 `makeOutputPath(..., 'extractAudio', { sameAsSource })`；输出目录框禁用并显示「与各自原文件同一文件夹」；「开始提取」禁用条件改为 `!hasOutput` |
+
+**效果 / 注意**
+- 勾选后每个文件输出到它自己的源目录，文件名沿用 `makeOutputPath`（`extractAudio` 后缀恒为 `''`），即 `clip.mp4 → clip.mp3`。
+- 复用 `OutputFolderPicker` 的 `showSameAsSource`，文案沿用 `out.sameAsSource` / `out.sameAsSourceHint`，未新增语言键。
+- 若源文件本身已是目标格式（如 `song.mp3` 提取为 mp3），输出路径与输入相同；此时由 Issue 23 的 `isSamePath` + 临时文件改名机制处理，不会损坏源文件。
+
+**验证**
+- `npx tsc --noEmit` 无错误；`npx vitest run` 19 个文件 / 140 用例全部通过。
+
+---
+
+## Issue 32 · 编辑页播放控件新增 10s / 5s / 1s 前进后退按钮
+
+**需求**
+- 原先只有「1 帧」步进，长视频定位要靠拖动进度条，精度和效率都不够。
+- 按钮排列（左 → 右）：后退 10s、后退 5s、后退 1s、后退 1 帧、前进 1 帧、前进 1s、前进 5s、前进 10s。
+
+**修复**
+
+| 文件 | 改动 |
+|---|---|
+| `src/renderer/pages/EditPage.tsx` | 新增 `seekBySeconds(delta)`：`setCurrentTime((prev) => clamp(prev + delta, 0, duration))`；播放控制行改为 8 个按钮（`flex-wrap justify-center`，窄面板自动换行）；1 帧按钮保持「按住连续步进 + ←/→ 快捷键」；「设为当前开始 / 结束」下移为独立一行 |
+| `src/renderer/i18n/locales/*.json`（10 份） | 新增 12 个键：`edit.stepBack10` / `stepBack5` / `stepBack1`、`edit.stepForward1` / `stepForward5` / `stepForward10` 及对应 `*Title` 悬停提示（文案沿用各语言既有「1 帧」措辞，如「后退 1 秒」/「Go back 1 second」/「1 Sekunde zurück」） |
+
+**效果**
+- 秒级跳转一律夹在 `[0, duration]`，到片头 / 片尾不会越界；秒级按钮单击即跳，逐帧按钮仍支持长按连发。
+- 起点 / 终点标记按钮位置下移，功能不变。
+
+**验证**
+- `npx tsc --noEmit` 无错误；`npx vitest run` 19 个文件 / 140 用例全部通过；10 份语言包 JSON 解析通过且新键齐全。
+
+---
+
 ## 遗留 / 待确认
 
 - **`src/renderer/utils/format.ts` 存在硬编码中文**，日语等语言下会在转码页 / 专家模式露出：
@@ -540,4 +952,7 @@ videoKbps = (source.bitrateMbps ?? 6) * 1000 * crfFactor(params.crf);
 - **移动版（portable）设置不持久**：便携版每次启动解压到新的随机临时目录，`appRoot()` 指向那里，`config.json` 写在临时目录里（实测 `%LOCALAPPDATA%\Temp\<随机>\config.json`，`%APPDATA%` 下从未生成）→ 语言 / 输出目录 / 预设每次重置。方案：优先使用 electron-builder 为 portable 注入的 `PORTABLE_EXECUTABLE_DIR`（**尚未实施，待确认**）。
 - **转码队列与编辑 / 旋转 / 提取音频共用**（同一个 `useQueueStore.items`，拼接页是独立 store）：在其它页签加过、后来文件被删除，切回转码页点「开始」仍会尝试转码并报错。是否加一道「开始前跳过已不存在的输入文件并在日志/提示里说明」的守卫（**待确认**）。
 - **主进程日志文案为中文**（如 `[环境] ⚠ 未找到必需组件…`）：属诊断信息，未纳入 i18n 修复范围。
-- **待提交**：`config.json` 的 `outputDir` 改回 `""`（HEAD 里当前是本机路径）以及本轮新增的 `concatOutputDir` 等改动仍在工作区。
+- **「覆盖原文件」目前只有红色警告，没有二次确认弹窗**（Issue 22/23）。若需要，可在开始前弹 `showConfirm()`（**待确认**）。
+- **自定义后缀的覆盖范围**（部分已解决）：转码 / 编辑 / 旋转三页现已各自可设（Issue 29）；提取音频按设计不设后缀（扩展名不同，Issue 31）。拼接页仍固定无后缀（**待确认**是否需要）。
+- **编辑页不再提供任何编码参数**（Issue 30 移除转码开关后）：如需在编辑后顺带压缩，只能走转码页。是否未来在编辑页接入转码页的参数面板（**待确认**）。
+- **待提交**：`config.json` 的 `outputDir` 改回 `""`（HEAD 里当前是本机路径）、`concatOutputDir`、`transcode` / `edit` / `rotate` / `extractAudio` 四段输出命名设置、`EditOptions.transcode` 的移除、`NumberField` / `SuffixOptions` / `useOutputNaming` / `shared/outputPath` 相关改动、编辑页播放控件（Issue 32）与 10 份语言包改动（新增 `suffix.titleEdit` / `suffix.titleRotate` / `edit.step*` 秒级跳转键，删除 `edit.transcode*`）、以及 `.vscode/settings.json` 仍在工作区。

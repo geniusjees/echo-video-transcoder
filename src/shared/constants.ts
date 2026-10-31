@@ -227,7 +227,26 @@ export const DEFAULT_CONFIG: AppConfig = {
     parallelJobs: 1,
     preferredHW: 'auto',
     fallbackToSoftware: true,
-    overwrite: 'ask'
+    overwrite: 'ask',
+    appendSuffix: true,
+    suffix: '_out',
+    outputSameAsSource: false
+  },
+
+  edit: {
+    appendSuffix: true,
+    suffix: '_edited',
+    outputSameAsSource: false
+  },
+
+  rotate: {
+    appendSuffix: true,
+    suffix: '_rotated',
+    outputSameAsSource: false
+  },
+
+  extractAudio: {
+    outputSameAsSource: false
   },
 
   simpleMode: {

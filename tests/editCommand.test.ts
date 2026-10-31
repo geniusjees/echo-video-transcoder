@@ -14,8 +14,7 @@ describe('编辑任务命令构建', () => {
       edit: {
         trimStartSec: 2,
         trimEndSec: 24,
-        cutSegments: [],
-        transcode: false
+        cutSegments: []
       }
     };
 

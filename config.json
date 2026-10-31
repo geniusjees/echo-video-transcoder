@@ -1,18 +1,21 @@
 {
   "version": "1.0",
-  "language": "zh-CN",
+  "language": "auto",
   "theme": "system",
   "paths": {
     "ffmpeg": "",
     "ffprobe": "",
-    "outputDir": "d:\\Users\\Jees\\Pictures\\2026\\Oct",
+    "outputDir": "E:\\HandShake Export",
     "concatOutputDir": "d:\\Users\\Jees\\Documents"
   },
   "transcode": {
     "parallelJobs": 1,
     "preferredHW": "auto",
     "fallbackToSoftware": true,
-    "overwrite": "ask"
+    "overwrite": "ask",
+    "appendSuffix": false,
+    "suffix": "",
+    "outputSameAsSource": true
   },
   "simpleMode": {
     "enabled": true,
@@ -63,5 +66,12 @@
     "enabled": true,
     "proxy": "",
     "subtitles": false
+  },
+  "edit": {
+    "outputSameAsSource": true,
+    "appendSuffix": false
+  },
+  "extractAudio": {
+    "outputSameAsSource": false
   }
 }

@@ -163,3 +163,25 @@ describe('§9.3 按硬件编码器生成质量参数', () => {
     expect(a).toContain('-cq 21');
   });
 });
+
+describe('自定义分辨率的缩放滤镜', () => {
+  it('目标低于源 → scale=-2:目标高度', () => {
+    const a = build({ resolution: 720 });
+    expect(a).toContain('-vf scale=-2:720');
+  });
+
+  it('目标等于源 → 不加缩放滤镜', () => {
+    const a = build({ resolution: 1080 });
+    expect(a).not.toContain('scale=');
+  });
+
+  it('目标高于源（显式允许放大后）→ 仍然放大', () => {
+    const a = build({ resolution: 2160 }, src({ width: 1920, height: 1080 }));
+    expect(a).toContain('-vf scale=-2:2160');
+  });
+
+  it('横向/纵向保持比例（-2 自动算宽度）', () => {
+    const a = build({ resolution: 1080 }, src({ width: 2560, height: 1440 }));
+    expect(a).toContain('-vf scale=-2:1080');
+  });
+});

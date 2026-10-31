@@ -1,5 +1,13 @@
 import { create } from 'zustand';
-import type { AppConfig, ExpertOptions, HWCapability } from '@shared/types';
+import type {
+  AppConfig,
+  EditConfig,
+  ExpertOptions,
+  ExtractAudioConfig,
+  HWCapability,
+  RotateConfig,
+  TranscodeConfig
+} from '@shared/types';
 
 interface ConfigState {
   config: AppConfig | null;
@@ -12,6 +20,14 @@ interface ConfigState {
   setOutputDir: (dir: string) => Promise<void>;
   /** 拼接页独立输出目录（不与转码共用） */
   setConcatOutputDir: (dir: string) => Promise<void>;
+  /** 转码页命名相关设置（后缀 / 与原文件同目录） */
+  setTranscodeConfig: (patch: Partial<TranscodeConfig>) => Promise<void>;
+  /** 编辑页命名相关设置（与转码页独立保存） */
+  setEditConfig: (patch: Partial<EditConfig>) => Promise<void>;
+  /** 旋转 / 翻转页命名相关设置（与转码页独立保存） */
+  setRotateConfig: (patch: Partial<RotateConfig>) => Promise<void>;
+  /** 音频提取页输出设置（提取到原始文件夹） */
+  setExtractAudioConfig: (patch: Partial<ExtractAudioConfig>) => Promise<void>;
   detect: (force?: boolean) => Promise<HWCapability>;
   setNotice: (n: string | null) => void;
 }
@@ -49,6 +65,42 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
     const current = get().config;
     if (!current) return;
     await get().save({ ...current, paths: { ...current.paths, concatOutputDir: dir } });
+  },
+
+  setTranscodeConfig: async (patch) => {
+    const current = get().config;
+    if (!current) return;
+    await get().save({
+      ...current,
+      transcode: { ...current.transcode, ...patch }
+    });
+  },
+
+  setEditConfig: async (patch) => {
+    const current = get().config;
+    if (!current) return;
+    await get().save({
+      ...current,
+      edit: { ...current.edit, ...patch }
+    });
+  },
+
+  setRotateConfig: async (patch) => {
+    const current = get().config;
+    if (!current) return;
+    await get().save({
+      ...current,
+      rotate: { ...current.rotate, ...patch }
+    });
+  },
+
+  setExtractAudioConfig: async (patch) => {
+    const current = get().config;
+    if (!current) return;
+    await get().save({
+      ...current,
+      extractAudio: { ...current.extractAudio, ...patch }
+    });
   },
 
   detect: async (force) => {

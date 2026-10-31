@@ -145,9 +145,33 @@ export function pickEncoderName(
     if (!isAvailable) continue;
 
     const encoder = HW_ENCODERS[rawHw]?.[codec] ?? HW_ENCODERS[hw]?.[codec];
-    if (encoder) return { encoder, hw: rawHw, fellBack: false };
+    if (!encoder) continue;
+    // 做过真实探测时，要求该编码器确实可用（厂商可用 ≠ 该编码可用，如老卡的 AV1）
+    if (cap.probedEncoders?.length && !cap.probedEncoders.includes(encoder)) continue;
+    return { encoder, hw: rawHw, fellBack: false };
   }
   return { encoder: SW_FALLBACK[codec], hw: 'software', fellBack: true };
+}
+
+export type HWFamily = 'nvenc' | 'qsv' | 'amf' | 'videotoolbox' | 'vaapi';
+
+/**
+ * 某厂商硬件在**指定编码**下是否真的可用：
+ * 厂商存在 + 该厂商支持此编码 + 真实探测确认可用。
+ * 与 `pickEncoderName` 使用同一判据，供 UI 决定是否禁用选项，避免
+ * 「选了某硬件但实际回退软件编码」的误解（如 AV1 + 老卡的 av1_nvenc/av1_amf）。
+ */
+export function isHwUsableForCodec(
+  cap: HWCapability | null | undefined,
+  hw: HWFamily,
+  codec: VideoCodec
+): boolean {
+  if (codec === 'copy') return false;
+  if (!cap || !cap[hw]) return false;
+  const encoder = HW_ENCODERS[hw]?.[codec];
+  if (!encoder) return false;
+  if (cap.probedEncoders?.length && !cap.probedEncoders.includes(encoder)) return false;
+  return true;
 }
 
 // ---------------- 专家模式参数解析（§8） ----------------

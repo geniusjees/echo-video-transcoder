@@ -2,6 +2,7 @@ import { ipcMain } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { IPC, TARGET } from '@shared/constants';
+import { makeOutputPath, type OutputNamingOptions } from '@shared/outputPath';
 import type {
   ExpertOptions,
   HWCapability,
@@ -39,6 +40,8 @@ interface QueueAddArg {
   scaleResolution?: boolean;
   mode?: 'simple' | 'expert';
   expert?: ExpertOptions;
+  /** 输出命名规则（自定义后缀 / 与原文件同目录）；缺省时取配置里的转码设置 */
+  naming?: OutputNamingOptions;
 }
 
 const EMPTY_SOURCE: SourceInfo = {
@@ -141,6 +144,9 @@ export function registerQueueIpc(): void {
             });
 
       const outputDir = arg.outputDir ?? cfg.paths.outputDir ?? '';
+      // 命名规则由渲染进程显式传入（转码页的「自定义后缀 / 与原文件同目录」）；
+      // 其它页面不传 → 保持任务类型默认后缀。
+      const naming: OutputNamingOptions | undefined = arg.naming;
       return {
         id,
         input: file,
@@ -154,7 +160,13 @@ export function registerQueueIpc(): void {
         output:
           decision.action === 'no-op'
             ? ''
-            : buildOutputPath(file, outputDir, decision.params?.container ?? 'mp4')
+            : makeOutputPath(
+                file,
+                outputDir,
+                decision.params?.container ?? 'mp4',
+                'transcode',
+                naming
+              )
       };
     };
 
@@ -168,8 +180,4 @@ export function registerQueueIpc(): void {
   });
 }
 
-export function buildOutputPath(input: string, outputDir: string, container: string): string {
-  const base = path.basename(input, path.extname(input));
-  const dir = outputDir || path.dirname(input);
-  return path.join(dir, `${base}_out.${container}`);
-}
+

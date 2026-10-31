@@ -7,6 +7,7 @@ import type {
   TaskPayload,
   TaskStatus
 } from '@shared/types';
+import type { OutputNamingOptions } from '@shared/outputPath';
 import { makeOutputPath } from '../utils/output';
 import { useConfigStore } from './configStore';
 
@@ -19,13 +20,19 @@ interface QueueState {
 
   addFiles: (
     paths: string[],
-    opts?: { scaleResolution?: boolean; expert?: ExpertOptions; mode?: 'simple' | 'expert' }
+    opts?: {
+      scaleResolution?: boolean;
+      expert?: ExpertOptions;
+      mode?: 'simple' | 'expert';
+      /** 输出命名规则（后缀 / 与原文件同目录） */
+      naming?: OutputNamingOptions;
+    }
   ) => Promise<QueueItem[]>;
   remove: (id: string) => void;
   clear: () => void;
   setItems: (items: QueueItem[]) => void;
   updateItem: (id: string, patch: Partial<QueueItem>) => void;
-  setOutputDirForAll: (dir: string) => void;
+  setOutputDirForAll: (dir: string, naming?: OutputNamingOptions) => void;
 
   start: (opts: {
     kind: TaskKind;
@@ -69,7 +76,8 @@ export const useQueueStore = create<QueueState>((set, get) => ({
         outputDir: config?.paths.outputDir ?? '',
         scaleResolution: opts?.scaleResolution,
         mode: opts?.mode,
-        expert: opts?.expert
+        expert: opts?.expert,
+        naming: opts?.naming
       });
     } catch (e) {
       log(`[入队] 主进程处理失败：${e instanceof Error ? e.message : String(e)}`);
@@ -94,14 +102,22 @@ export const useQueueStore = create<QueueState>((set, get) => ({
   updateItem: (id, patch) =>
     set((s) => ({ items: s.items.map((i) => (i.id === id ? { ...i, ...patch } : i)) })),
 
-  setOutputDirForAll: (dir) =>
-    set((s) => ({
-      items: s.items.map((i) => ({
+  setOutputDirForAll: (dir, naming) =>
+    set((s) => {
+      // 幂等：目录与命名规则都未变化时不产生新状态，避免多余重渲染
+      const next = s.items.map((i) => ({
         ...i,
         outputDir: dir,
-        output: i.resolved ? makeOutputPath(i.input, dir, i.resolved.container) : i.output
-      }))
-    })),
+        output: i.resolved
+          ? makeOutputPath(i.input, dir, i.resolved.container, 'transcode', naming)
+          : i.output
+      }));
+      const unchanged = next.every(
+        (n, idx) => n.output === s.items[idx].output && n.outputDir === s.items[idx].outputDir
+      );
+      if (unchanged) return s;
+      return { items: next };
+    }),
 
   start: async ({ build, filter }) => {
     const items = get().items.filter((i) => (filter ? filter(i) : true));

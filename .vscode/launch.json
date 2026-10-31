@@ -2,7 +2,10 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Electron: 开发 (npm run dev)",
+      // 开发调试：启动 electron-vite dev，并自动附加到 Electron 主进程。
+      // outFiles/sourceMaps 让 src/main、src/preload 里的 TS 断点能正确绑定
+      // （实际运行的是构建产物 dist/main、dist/preload）。
+      "name": "Electron: 开发 (调试主进程)",
       "type": "node",
       "request": "launch",
       "cwd": "${workspaceFolder}",
@@ -10,23 +13,31 @@
       "runtimeArgs": ["run", "dev"],
       "console": "integratedTerminal",
       "autoAttachChildProcesses": true,
-      "skipFiles": ["<node_internals>/**", "node_modules/electron/**"],
-      "windows": {
-        "runtimeExecutable": "npm.cmd"
-      }
+      "sourceMaps": true,
+      "outFiles": [
+        "${workspaceFolder}/dist/main/**/*.js",
+        "${workspaceFolder}/dist/preload/**/*.js",
+        "${workspaceFolder}/out/**/*.js"
+      ],
+      "skipFiles": ["<node_internals>/**"],
+      "windows": { "runtimeExecutable": "npm.cmd" }
     },
     {
-      "name": "Electron: 打包 (npm run dist)",
+      // 打包：故意用 "noDebug": true —— 只运行、不附加调试器。
+      // 这样不会把 NODE_OPTIONS=--require .../js-debug/bootloader.js 注入
+      // electron-builder 的整棵进程树；否则 js-debug 扩展路径一旦失效，
+      // 构建里的每个 node 子进程都会 MODULE_NOT_FOUND 而失败。
+      // （等同于此配置上用「运行(不调试)」/ Ctrl+F5。）
+      "name": "Electron: 打包 (npm run dist，不调试)",
       "type": "node",
       "request": "launch",
+      "noDebug": true,
       "cwd": "${workspaceFolder}",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dist"],
       "console": "integratedTerminal",
       "skipFiles": ["<node_internals>/**"],
-      "windows": {
-        "runtimeExecutable": "npm.cmd"
-      }
+      "windows": { "runtimeExecutable": "npm.cmd" }
     }
   ]
 }

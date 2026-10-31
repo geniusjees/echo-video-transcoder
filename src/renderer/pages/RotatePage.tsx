@@ -2,11 +2,13 @@ import { useState } from 'react';
 import type { FlipMode, RotateMode, TaskPayload } from '@shared/types';
 import OutputFolderPicker from '../components/OutputFolderPicker';
 import QueueList from '../components/QueueList';
+import SuffixOptions from '../components/SuffixOptions';
 import { useConfigStore } from '../stores/configStore';
 import { useQueueStore } from '../stores/queueStore';
 import { useDropHandler } from '../hooks/useDropHandler';
+import { useOutputNaming } from '../hooks/useOutputNaming';
 import { useT } from '../i18n';
-import { makeOutputPath } from '../utils/output';
+import { makeOutputPath, outputFileName } from '../utils/output';
 
 /** 角度本身语言无关，仅「不旋转」需要本地化 */
 const ROTATE_MODES: { v: RotateMode; label?: string; labelKey?: string }[] = [
@@ -39,6 +41,25 @@ export default function RotatePage() {
   const [flip, setFlip] = useState<FlipMode>('none');
 
   const outputDir = config?.paths.outputDir ?? '';
+
+  // ---- 输出命名设置（与转码 / 编辑页同一套逻辑，配置独立保存）----
+  const {
+    naming,
+    appendSuffix,
+    sameAsSource,
+    suffixDraft,
+    validation: suffixValidation,
+    invalid: suffixInvalid,
+    setAppendSuffix,
+    setSameAsSource,
+    onSuffixChange
+  } = useOutputNaming('rotate');
+
+  /** 「与原文件同一文件夹」时不需要选输出目录 */
+  const hasOutput = sameAsSource || Boolean(outputDir);
+  /** 输出文件名示例（如 clip_rotated.mp4） */
+  const exampleName = outputFileName(items[0]?.input ?? 'video.mp4', 'mp4', 'rotate', naming);
+
   // 翻转必须重编码；仅旋转时由主进程按格式自动判断能否使用元数据
   const needReencode = flip !== 'none';
 
@@ -68,7 +89,8 @@ export default function RotatePage() {
         id: item.id,
         kind: 'rotate',
         input: item.input,
-        output: makeOutputPath(item.input, item.outputDir || outputDir, 'mp4', 'rotate'),
+        // 始终按当前设置推导：同目录 / 自定义后缀 / 覆盖原文件都在 makeOutputPath 内处理
+        output: makeOutputPath(item.input, outputDir, 'mp4', 'rotate', naming),
         durationSec: item.source.durationSec,
         // metadataOnly 恒为 true：能用元数据旋转就一定会用
         rotate: { mode, flip, metadataOnly: true }
@@ -77,8 +99,8 @@ export default function RotatePage() {
   };
 
   return (
-    <div className="grid grid-cols-[1fr_380px] gap-4">
-      <div className="space-y-4">
+    <div className="grid grid-cols-[minmax(0,1fr)_380px] gap-4">
+      <div className="min-w-0 space-y-4">
         <QueueList
           titleKey="queue.titleRotate"
           items={items}
@@ -134,11 +156,32 @@ export default function RotatePage() {
           </div>
         </div>
 
-        <OutputFolderPicker value={outputDir} onChange={changeOutputDir} required />
+        <OutputFolderPicker
+          value={outputDir}
+          onChange={changeOutputDir}
+          required
+          disabled={sameAsSource}
+          showSameAsSource
+          sameAsSource={sameAsSource}
+          onSameAsSourceChange={setSameAsSource}
+        />
+
+        <SuffixOptions
+          title={t('suffix.titleRotate')}
+          checked={appendSuffix}
+          onCheckedChange={setAppendSuffix}
+          value={suffixDraft}
+          onValueChange={onSuffixChange}
+          validation={suffixValidation}
+          sameAsSource={sameAsSource}
+          example={exampleName}
+        />
+
+        {suffixInvalid && <p className="text-xs text-err">{t('op.invalidSuffix')}</p>}
 
         <button
           className="btn-primary w-full"
-          disabled={!outputDir || !items.length || busy}
+          disabled={!hasOutput || suffixInvalid || !items.length || busy}
           onClick={onStart}
         >
           ▶ {t('rotate.start')}

@@ -13,6 +13,72 @@ function run(cmd: string, args: string[]): Promise<string> {
   });
 }
 
+/** 执行命令并返回退出码（0 = 成功） */
+function runStatus(cmd: string, args: string[]): Promise<number> {
+  return new Promise((resolve) => {
+    execFile(cmd, args, { timeout: 15000, windowsHide: true }, (err) => {
+      if (!err) return resolve(0);
+      const code = (err as { code?: unknown }).code;
+      resolve(typeof code === 'number' ? code : 1);
+    });
+  });
+}
+
+/**
+ * 硬件编码器探测命令：用该编码器编码 1 帧黑画面到 null。
+ * 成功（退出码 0）才说明「本机真的能用它」，仅出现在 `-encoders` 里是不够的。
+ */
+export function buildProbeArgs(encoder: string): string[] {
+  const vaapi = encoder.endsWith('_vaapi');
+  return [
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    ...(vaapi ? ['-vaapi_device', '/dev/dri/renderD128'] : []),
+    '-f',
+    'lavfi',
+    '-i',
+    // 探测帧必须大于硬件编码器的最小支持尺寸：NVENC 对 128×128 会直接报
+    // "Frame dimensions are less than the minimum supported value"(-22)，
+    // 从而把「硬件可用」误判成不可用。
+    'color=c=black:s=640x480:r=1',
+    '-frames:v',
+    '1',
+    ...(vaapi ? ['-vf', 'format=nv12,hwupload'] : ['-pix_fmt', 'nv12']),
+    '-c:v',
+    encoder,
+    '-f',
+    'null',
+    '-'
+  ];
+}
+
+/** 真实探测某个硬件编码器是否可用（编码一帧，成功即视为本机可用） */
+async function probeHardwareEncoder(encoder: string): Promise<boolean> {
+  const bin = ffmpegPath();
+  if (!bin) return false;
+  try {
+    return (await runStatus(bin, buildProbeArgs(encoder))) === 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 每个厂商的候选编码器（按优先级）。
+ * 有些老显卡只支持 H.264 NVENC（无 HEVC/AV1），所以任一候选成功即认为该厂商可用，
+ * 并把真实可用的编码器名记入 `probedEncoders`，供选编码器时精确判断。
+ */
+const PROBE_ENCODERS: Record<'nvenc' | 'qsv' | 'amf' | 'videotoolbox' | 'vaapi', string[]> = {
+  nvenc: ['hevc_nvenc', 'h264_nvenc', 'av1_nvenc'],
+  qsv: ['hevc_qsv', 'h264_qsv', 'av1_qsv'],
+  amf: ['hevc_amf', 'h264_amf', 'av1_amf'],
+  videotoolbox: ['hevc_videotoolbox', 'h264_videotoolbox'],
+  vaapi: ['hevc_vaapi', 'h264_vaapi']
+};
+
+type HwFamily = keyof typeof PROBE_ENCODERS;
+
 /**
  * 返回 `ffmpeg -encoders` 的原始输出
  *
@@ -35,17 +101,46 @@ export async function detect(): Promise<HWCapability> {
   const platform = process.platform;
   const arch = os.arch();
 
-  const cap: HWCapability = {
+  // `ffmpeg -encoders` 只反映「编译进来」的编码器（标准构建在没有对应硬件的机器上
+  // 也会列出 nvenc/qsv/amf…），若据此判定可用 → 选项灰不掉、且实际编码会失败。
+  // 因此对每个厂商实际编码 1 帧来做真实探测（并行执行）。
+  const compiled = {
     nvenc: /nvenc/i.test(encoders),
     qsv: /_qsv\b/i.test(encoders),
     amf: /_amf\b/i.test(encoders),
     videotoolbox: /videotoolbox/i.test(encoders),
-    vaapi: /vaapi/i.test(encoders),
+    vaapi: /vaapi/i.test(encoders)
+  };
+  // 只探测「编译进来 + 平台相关」的厂商，避免无谓的 ffmpeg 进程
+  const familyApplicable: Record<HwFamily, boolean> = {
+    nvenc: compiled.nvenc,
+    qsv: compiled.qsv,
+    amf: compiled.amf,
+    videotoolbox: platform === 'darwin' && compiled.videotoolbox,
+    vaapi: platform === 'linux' && compiled.vaapi
+  };
+
+  const candidates = (Object.keys(PROBE_ENCODERS) as HwFamily[]).flatMap((fam) =>
+    familyApplicable[fam] ? PROBE_ENCODERS[fam].map((name) => ({ fam, name })) : []
+  );
+  const probed = await Promise.all(
+    candidates.map(async (c) => ({ ...c, ok: await probeHardwareEncoder(c.name) }))
+  );
+  const working = probed.filter((p) => p.ok);
+  const hasFamily = (fam: HwFamily): boolean => working.some((p) => p.fam === fam);
+
+  const cap: HWCapability = {
+    nvenc: hasFamily('nvenc'),
+    qsv: hasFamily('qsv'),
+    amf: hasFamily('amf'),
+    videotoolbox: hasFamily('videotoolbox'),
+    vaapi: hasFamily('vaapi'),
     mps: false,
     recommended: 'software',
     platform,
     arch,
-    encoders: parseEncoderNames(encoders)
+    encoders: parseEncoderNames(encoders),
+    probedEncoders: working.map((p) => p.name)
   };
 
   if (platform === 'darwin') {

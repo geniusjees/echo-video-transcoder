@@ -3,6 +3,7 @@ import type { AudioCodec, TaskPayload } from '@shared/types';
 import { AUDIO_EXT } from '@shared/constants';
 import OutputFolderPicker from '../components/OutputFolderPicker';
 import QueueList from '../components/QueueList';
+import NumberField from '../components/NumberField';
 import { useConfigStore } from '../stores/configStore';
 import { useQueueStore } from '../stores/queueStore';
 import { useDropHandler } from '../hooks/useDropHandler';
@@ -15,6 +16,7 @@ export default function ExtractAudioPage() {
   const t = useT();
   const config = useConfigStore((s) => s.config);
   const setOutputDirCfg = useConfigStore((s) => s.setOutputDir);
+  const setExtractAudioCfg = useConfigStore((s) => s.setExtractAudioConfig);
   const items = useQueueStore((s) => s.items);
   const progress = useQueueStore((s) => s.progress);
   const addFiles = useQueueStore((s) => s.addFiles);
@@ -32,6 +34,10 @@ export default function ExtractAudioPage() {
   const [endSec, setEndSec] = useState(60);
 
   const outputDir = config?.paths.outputDir ?? '';
+  /** 提取到原始文件夹：扩展名与源文件不同，不会覆盖，因此不需要后缀 */
+  const sameAsSource = config?.extractAudio?.outputSameAsSource ?? false;
+  /** 「提取到原始文件夹」时不需要选输出目录 */
+  const hasOutput = sameAsSource || Boolean(outputDir);
 
   // 窗口任意位置拖入均入队（C9）
   useDropHandler((paths) => void addFiles(paths));
@@ -63,7 +69,8 @@ export default function ExtractAudioPage() {
           item.input,
           item.outputDir || outputDir,
           AUDIO_EXT[codec],
-          'extractAudio'
+          'extractAudio',
+          { sameAsSource }
         ),
         durationSec: item.source.durationSec,
         audio: {
@@ -79,8 +86,8 @@ export default function ExtractAudioPage() {
   };
 
   return (
-    <div className="grid grid-cols-[1fr_380px] gap-4">
-      <div className="space-y-4">
+    <div className="grid grid-cols-[minmax(0,1fr)_380px] gap-4">
+      <div className="min-w-0 space-y-4">
         <QueueList
           titleKey="queue.titleAudio"
           items={items}
@@ -122,12 +129,7 @@ export default function ExtractAudioPage() {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="label">{t('audio.bitrate')}</label>
-              <input
-                className="input"
-                type="number"
-                value={bitrateKbps}
-                onChange={(e) => setBitrateKbps(Number(e.target.value))}
-              />
+              <NumberField value={bitrateKbps} min={1} onChange={setBitrateKbps} />
             </div>
             <div>
               <label className="label">{t('audio.sampleRate')}</label>
@@ -191,11 +193,19 @@ export default function ExtractAudioPage() {
           )}
         </div>
 
-        <OutputFolderPicker value={outputDir} onChange={changeOutputDir} required />
+        <OutputFolderPicker
+          value={outputDir}
+          onChange={changeOutputDir}
+          required
+          disabled={sameAsSource}
+          showSameAsSource
+          sameAsSource={sameAsSource}
+          onSameAsSourceChange={(v) => void setExtractAudioCfg({ outputSameAsSource: v })}
+        />
 
         <button
           className="btn-primary w-full"
-          disabled={!outputDir || !items.length || busy}
+          disabled={!hasOutput || !items.length || busy}
           onClick={onStart}
         >
           ▶ {t('audio.start')}

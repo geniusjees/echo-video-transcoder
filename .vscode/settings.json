@@ -1,0 +1,13 @@
+{
+  // 关闭 JS 调试器的「终端自动附加」。
+  //
+  // 开启时 VS Code 会给每个集成终端注入：
+  //   NODE_OPTIONS=--require "<VS Code 安装目录>/<build-hash>/resources/app/extensions/ms-vscode.js-debug/src/bootloader.js"
+  // 而 <build-hash> 会随 VS Code 升级而变（本项目已先后遇到 04c0d99f4f → 2a59476c9b → e646868227）。
+  // 已开着的终端里残留的旧路径失效后，之后任何 npm 命令都会在 node 预加载阶段
+  // MODULE_NOT_FOUND 直接退出（npm run dev / npm run dist 都一样），与项目代码无关。
+  //
+  // 本项目通过 .vscode/launch.json 里的配置调试，不需要终端自动附加。
+  // 如需恢复：把值改为 "smart" 或 "always"，并重启 VS Code（让扩展路径重新解析）。
+  "debug.javascript.autoAttachFilter": "disabled"
+}

@@ -85,12 +85,12 @@ export default function QueueList({
   };
 
   const header = (
-    <div className="flex shrink-0 items-center justify-between">
-      <span className="text-sm font-semibold text-body">
+    <div className="flex min-w-0 shrink-0 items-center justify-between gap-2">
+      <span className="truncate text-sm font-semibold text-body">
         {t(titleKey ?? 'queue.title')}
         {items.length > 0 && <span className="ml-1.5 text-xs text-faint">（{items.length}）</span>}
       </span>
-      <div className="flex items-center gap-3 text-xs">
+      <div className="flex shrink-0 items-center gap-3 text-xs">
         {onAdd && (
           <button className="text-accent hover:underline" onClick={onAdd}>
             {t('queue.addFiles')}
@@ -149,15 +149,18 @@ export default function QueueList({
               selectedId === item.id ? 'border-brand-500' : ''
             }`}
           >
-            <div className="flex items-start justify-between gap-3">
+            <div className="flex min-w-0 items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="truncate text-sm font-medium text-strong">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span
+                    className="min-w-0 truncate text-sm font-medium text-strong"
+                    title={baseName(item.input)}
+                  >
                     {isAudio ? '🎵' : '🎬'} {baseName(item.input)}
                   </span>
                   <StatusChip status={item.status} />
                 </div>
-                <div className="mt-0.5 text-xs text-faint">
+                <div className="mt-0.5 break-words text-xs text-faint">
                   {isAudio ? (
                     audioSourceParts(item).join(' · ')
                   ) : (
@@ -172,7 +175,7 @@ export default function QueueList({
                   )}
                 </div>
                 {failed ? (
-                  <p className="mt-1 text-xs text-err">{item.error}</p>
+                  <p className="mt-1 break-words text-xs text-err">{item.error}</p>
                 ) : noop ? (
                   <p className="mt-1 text-xs text-muted">
                     ⚠ {t('queue.noTranscode')}
@@ -226,7 +229,7 @@ export default function QueueList({
 
   if (isFill) {
     return (
-      <div className="flex h-full min-h-0 flex-col gap-2">
+      <div className="flex h-full min-h-0 min-w-0 flex-col gap-2">
         {header}
         <div
           className={`min-h-0 flex-1 space-y-2 overflow-y-auto pr-1 transition-shadow ${
@@ -240,7 +243,7 @@ export default function QueueList({
   }
 
   return (
-    <div className="space-y-2">
+    <div className="min-w-0 space-y-2">
       {header}
       <div
         className={`space-y-2 overflow-y-auto pr-1 transition-shadow ${

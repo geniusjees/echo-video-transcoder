@@ -65,8 +65,8 @@ export default function ConcatPage() {
   const canStart = Boolean(outputDir) && Boolean(plan) && segments.length > 0 && !busy;
 
   return (
-    <div className="grid grid-cols-[1fr_380px] gap-4">
-      <div className="space-y-4">
+    <div className="grid grid-cols-[minmax(0,1fr)_380px] gap-4">
+      <div className="min-w-0 space-y-4">
         <DropZone onFiles={(paths) => void addFiles(paths)} hint={t('concat.dropHint')} />
 
         <div className="flex items-center gap-2">

@@ -18,11 +18,15 @@ export interface CommandContext {
   capability?: HWCapability;
   preferredHW?: 'auto' | HWKind;
   extraArgs?: string[];
+  /** 强制软件编码：硬件编码器打不开时的兜底重试（§9.3） */
+  forceSoftware?: boolean;
 }
 
 /** 选定实际视频编码器：硬件优先，不支持则软件兜底（§9.3） */
 export function resolveVideoEncoder(params: ResolvedParams, ctx: CommandContext): string {
   if (params.codec === 'copy') return 'copy';
+  // 兜底重试：忽略硬件选择，直接用软件编码器
+  if (ctx.forceSoftware) return SW_FALLBACK[params.codec];
   if (params.hwCodec) return params.hwCodec;
   if (ctx.capability) {
     const { encoder } = pickEncoder(ctx.capability, params.codec, ctx.preferredHW ?? 'auto');
@@ -150,8 +154,10 @@ function buildFilters(
   extraFilters: string[] = []
 ): string[] {
   const filters = [...extraFilters];
-  // 只在目标高度低于源高度时缩放（C6：绝不放大）
-  if (params.resolution > 0 && source.height > 0 && params.resolution < source.height) {
+  // 按「生效高度」缩放：等于源尺寸时无需滤镜。
+  // 「绝不放大」的封顶规则在上游 shared/params 的 applyCaps 完成，
+  // 此处若仍判断 target < source，会导致专家模式显式允许放大时依然不放大。
+  if (params.resolution > 0 && source.height > 0 && params.resolution !== source.height) {
     filters.push(`scale=-2:${params.resolution}`);
   }
   return filters.length ? ['-vf', filters.join(',')] : [];
@@ -303,7 +309,6 @@ export function buildEditArgs(
     trimEndSec?: number;
     cutSegments?: Array<{ startSec: number; endSec: number }>;
     rotation?: { mode: 0 | 90 | 180 | 270; flip: 'none' | 'horizontal' | 'vertical'; metadataOnly?: boolean };
-    transcode?: boolean;
   },
   source: SourceInfo,
   ctx: CommandContext = {}
@@ -319,7 +324,7 @@ export function buildEditArgs(
     rotation: opts.rotation,
     cutSegments: opts.cutSegments
   });
-  const isSimpleTrim = !hasCutSegments && !filters.length && !opts.transcode;
+  const isSimpleTrim = !hasCutSegments && !filters.length;
 
   if (typeof trimStart === 'number' && trimStart > 0) {
     args.push('-ss', String(trimStart));
@@ -373,8 +378,7 @@ export function buildArgsForTask(
           trimStartSec: payload.edit?.trimStartSec,
           trimEndSec: payload.edit?.trimEndSec,
           cutSegments: payload.edit?.cutSegments,
-          rotation: payload.edit?.rotation,
-          transcode: payload.edit?.transcode
+          rotation: payload.edit?.rotation
         },
         source,
         ctx

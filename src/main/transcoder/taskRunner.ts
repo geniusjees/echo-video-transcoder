@@ -18,7 +18,14 @@ import {
 import { probe } from '../media/probe';
 import { ffmpegPath } from '../utils/paths';
 import { buildArgsForTask, toCommandString, type CommandContext } from './commandBuilder';
+import { isSoftwareEncoder } from './encoderProfile';
 import { runProcess, type RunningProcess } from './processManager';
+
+/** 从构建好的参数里取实际使用的视频编码器（`-c:v` 之后一项） */
+function videoEncoderInArgs(args: string[]): string | undefined {
+  const i = args.indexOf('-c:v');
+  return i >= 0 ? args[i + 1] : undefined;
+}
 
 export interface TaskEvents {
   onProgress?: (p: ProgressPayload) => void;
@@ -52,6 +59,40 @@ function ensureOutputDir(output: string): void {
     fs.mkdirSync(path.dirname(output), { recursive: true });
   } catch {
     /* 创建失败则交给 ffmpeg 报错 */
+  }
+}
+
+/** 输出路径与输入路径是否指向同一个文件（Windows 不区分大小写） */
+export function isSamePath(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  const na = path.resolve(a);
+  const nb = path.resolve(b);
+  return process.platform === 'win32' ? na.toLowerCase() === nb.toLowerCase() : na === nb;
+}
+
+/**
+ * 覆盖原文件时的临时输出路径：
+ * 必须保留原扩展名（ffmpeg 靠扩展名判断封装格式），且与目标同目录（便于改名）。
+ */
+export function tempOutputFor(output: string, id: string): string {
+  const dir = path.dirname(output);
+  const ext = path.extname(output);
+  const base = path.basename(output, ext);
+  return path.join(dir, `${base}.tmp-${id}${ext}`);
+}
+
+/** 用临时文件替换目标文件（rename 在 Windows 上会覆盖已存在文件） */
+function replaceFile(from: string, to: string): void {
+  try {
+    fs.renameSync(from, to);
+  } catch {
+    // 跨设备等场景 rename 可能失败 → 退回复制后删除
+    fs.copyFileSync(from, to);
+    try {
+      fs.unlinkSync(from);
+    } catch {
+      /* ignore */
+    }
   }
 }
 
@@ -161,14 +202,70 @@ export class TaskRunner {
   private async runFfmpeg(payload: TaskPayload): Promise<void> {
     const source = await safeProbe(payload.input);
     const duration = payload.durationSec || source.durationSec;
-    const args = buildArgsForTask(payload, source, this.ctx);
+
+    // 覆盖原文件（输出路径 == 输入路径）时不能直接写：ffmpeg 会截断输入文件导致失败。
+    // 改为先写到同目录的临时文件，成功后再改名替换原文件。
+    const inPlace = isSamePath(payload.input, payload.output);
+    const work = inPlace
+      ? { ...payload, output: tempOutputFor(payload.output, payload.id) }
+      : payload;
+
+    try {
+      const first = await this.execFfmpeg(work, source, duration, this.ctx);
+      if (first.ok) {
+        if (inPlace) replaceFile(work.output, payload.output);
+        return;
+      }
+
+      // 兜底：硬件编码器没产出任何帧就失败（打不开/驱动不支持该素材），
+      // 自动改用软件编码重试一次，避免整个任务直接失败（§9.3）。
+      if (first.frames === 0 && first.usedHardware) {
+        this.events.onLog?.(
+          `[兜底] 硬件编码失败（${first.encoder ?? 'hw'}），改用软件编码重试：${payload.input}`
+        );
+        const second = await this.execFfmpeg(work, source, duration, {
+          ...this.ctx,
+          forceSoftware: true
+        });
+        if (second.ok) {
+          if (inPlace) replaceFile(work.output, payload.output);
+          return;
+        }
+        throw new Error(second.error || 'ffmpeg 失败');
+      }
+      throw new Error(first.error || 'ffmpeg 失败');
+    } finally {
+      // 失败时不要留下临时文件
+      if (inPlace) {
+        try {
+          if (fs.existsSync(work.output)) fs.unlinkSync(work.output);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  }
+
+  /** 执行一次 ffmpeg，返回是否成功、产出帧数与所用编码器 */
+  private async execFfmpeg(
+    payload: TaskPayload,
+    source: SourceInfo,
+    duration: number,
+    ctx: CommandContext
+  ): Promise<{ ok: boolean; error?: string; frames: number; usedHardware: boolean; encoder?: string }> {
+    const args = buildArgsForTask(payload, source, ctx);
     const bin = ffmpegPath();
     this.events.onCommand?.(payload.id, toCommandString(bin, args));
 
+    const encoder = videoEncoderInArgs(args);
+    const usedHardware = Boolean(encoder && encoder !== 'copy' && !isSoftwareEncoder(encoder));
+
+    let frames = 0;
     ensureOutputDir(payload.output);
     const proc = runProcess(bin, args, {
       durationSec: duration,
-      onProgress: (p) =>
+      onProgress: (p) => {
+        frames = Math.max(frames, p.frame);
         this.emitProgress(
           payload,
           {
@@ -180,7 +277,8 @@ export class TaskRunner {
             etaSec: p.speed > 0 && duration > 0 ? Math.max(0, (duration - p.outTimeSec) / p.speed) : undefined
           },
           'running'
-        ),
+        );
+      },
       onLog: (line) => this.events.onLog?.(line)
     });
     this.running.set(payload.id, { payload, proc });
@@ -191,7 +289,13 @@ export class TaskRunner {
       const locale = resolveConcatDialogLocale(getConfig().language, app.getLocale?.() ?? undefined);
       throw new Error(formatConcatCancelMessage(locale));
     }
-    if (res.code !== 0) throw new Error(res.error || `ffmpeg exit code ${res.code}`);
+    return {
+      ok: res.code === 0,
+      error: res.error || `ffmpeg exit code ${res.code}`,
+      frames,
+      usedHardware,
+      encoder
+    };
   }
 
   /** 拼接：先（可选）转码对齐，再 concat（§10.6） */

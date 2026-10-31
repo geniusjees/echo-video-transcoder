@@ -159,7 +159,13 @@ export interface HWCapability {
    * x86_64 版会报 `-q:v qscale not available`，需退回码率模式。
    */
   vtConstantQuality?: boolean;
+  /** `ffmpeg -encoders` 中编译进来的编码器名 */
   encoders: string[];
+  /**
+   * 经过「真实编码一帧」探测、确认本机可用的硬件编码器名（如 `hevc_nvenc`）。
+   * 用于避免「厂商可用但该编码不支持」时仍选中导致编码失败。
+   */
+  probedEncoders?: string[];
 }
 
 // ---------------- 专家模式 / 预设 ----------------
@@ -213,7 +219,6 @@ export interface EditOptions {
   trimEndSec?: number;
   cutSegments?: EditCutSegment[];
   rotation?: RotateOptions;
-  transcode?: boolean;
 }
 
 export interface RotateOptions {
@@ -297,6 +302,12 @@ export interface TranscodeConfig {
   preferredHW: 'auto' | HWKind;
   fallbackToSoftware: boolean;
   overwrite: 'ask' | 'always' | 'never';
+  /** 转码后是否给文件名追加后缀 */
+  appendSuffix: boolean;
+  /** 自定义文件名后缀（≤ 16 字符，如 "_out"） */
+  suffix: string;
+  /** 输出到各自输入文件所在目录（与原文件同一文件夹） */
+  outputSameAsSource: boolean;
 }
 
 export interface SimpleModeConfig {
@@ -347,12 +358,41 @@ export interface AdvancedConfig {
   preventSleep: boolean;
 }
 
+/** 编辑页的输出命名设置（与转码页同构，但独立保存，互不影响） */
+export interface EditConfig {
+  /** 编辑后是否给文件名追加后缀 */
+  appendSuffix: boolean;
+  /** 自定义文件名后缀（≤ 16 字符，如 "_edited"） */
+  suffix: string;
+  /** 输出到各自输入文件所在目录（与原文件同一文件夹） */
+  outputSameAsSource: boolean;
+}
+
+/** 旋转 / 翻转页的输出命名设置（与转码页同构，但独立保存） */
+export interface RotateConfig {
+  /** 旋转后是否给文件名追加后缀 */
+  appendSuffix: boolean;
+  /** 自定义文件名后缀（≤ 16 字符，如 "_rotated"） */
+  suffix: string;
+  /** 输出到各自输入文件所在目录（与原文件同一文件夹） */
+  outputSameAsSource: boolean;
+}
+
+/** 音频提取页的输出设置：扩展名与源文件不同，因此不需要后缀 */
+export interface ExtractAudioConfig {
+  /** 提取到各自输入文件所在目录 */
+  outputSameAsSource: boolean;
+}
+
 export interface AppConfig {
   version: string;
   language: string;
   theme: 'system' | 'light' | 'dark';
   paths: PathsConfig;
   transcode: TranscodeConfig;
+  edit: EditConfig;
+  rotate: RotateConfig;
+  extractAudio: ExtractAudioConfig;
   simpleMode: SimpleModeConfig;
   expertDefaults: ExpertDefaultsConfig;
   presets: PresetsConfig;
